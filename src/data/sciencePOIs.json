@@ -1,0 +1,7 @@
+[
+  { "id": "delta", "name": "Jezero Delta Front", "lat": 18.48, "lon": 77.35, "note": "Ancient river delta, prime target for signs of past life" },
+  { "id": "seitah", "name": "Seitah Formation", "lat": 18.4, "lon": 77.2, "note": "Layered rock with possible igneous history" },
+  { "id": "carbonates", "name": "Carbonate Outcrop", "lat": 20.3, "lon": 75.4, "note": "Carbonate minerals that form in water" },
+  { "id": "clay", "name": "Clay Outcrop", "lat": 19.4, "lon": 76.2, "note": "Clay minerals that preserve organic material" },
+  { "id": "isidis", "name": "Isidis Basin Rim", "lat": 17.6, "lon": 79.5, "note": "Ancient impact basin rim" }
+]
