@@ -1,57 +1,55 @@
-import { useEffect } from 'react'
-import { useRouteStore } from '../store/useRouteStore'
-import RouteLayer from '../components/map/RouteLayer'
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import RouteMap from "../components/route/RouteMap";
+import RouteGlobe from '../components/route/RouteGlobe'
 import RoutePanel from '../components/route/RoutePanel'
 import RouteOverview from '../components/route/RouteOverview'
 import ElevationProfile from '../components/route/ElevationProfile'
 import RouteWarnings from '../components/route/RouteWarnings'
 import ScienceStops from '../components/route/ScienceStops'
-import TerrainConditions from '../components/info/TerrainConditions'
+import DestinationInfo from '../components/route/DestinationInfo'
 
 export default function RoutePlannerPage() {
-  const result = useRouteStore((s) => s.result)
-  const planRoute = useRouteStore((s) => s.planRoute)
+  const navigate = useNavigate()
+  const [route, setRoute] = useState(null)
+  const [selected, setSelected] = useState([])
+  const [view, setView] = useState('terrain') // terrain | satellite | elevation
 
-  useEffect(() => {
-    if (!result) planRoute()
-  }, [result, planRoute])
+  const toggleStop = (id) =>
+    setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
+
+  const handleRouteChange = (r) => {
+    setRoute(r)
+    setSelected([])
+  }
 
   return (
-    <div className="h-full relative bg-bg">
-      {result ? (
-        <RouteLayer result={result} />
-      ) : (
-        <div className="h-full flex items-center justify-center text-muted text-sm">
-          Route nai. Bam pashe location select kore Plan Route chapo.
+    // adjust 90px to your navbar height
+    <div style={{ position: 'relative', height: 'calc(100vh - 90px)', overflow: 'hidden' }}>
+      <RouteMap route={route} view={view} selectedStopIds={selected} />
+
+      <div className="rm-layout">
+        <RoutePanel onBack={() => navigate('/')} onRouteChange={handleRouteChange} />
+
+        <div className="rm-viewtoggle">
+          {['terrain', 'satellite', 'elevation'].map((v) => (
+            <button key={v} className={view === v ? 'is-active' : ''} onClick={() => setView(v)}>
+              {v[0].toUpperCase() + v.slice(1)}
+            </button>
+          ))}
         </div>
-      )}
 
-      <RoutePanel />
+        <div className="rm-right">
+          <DestinationInfo route={route} onDetails={() => navigate('/missions')} />
+          <RouteWarnings route={route} />
+          <ScienceStops route={route} selectedIds={selected} onToggle={toggleStop} />
+        </div>
 
-      {result && (
-        <>
-          <aside className="absolute right-4 top-4 bottom-4 w-[330px] bg-panel/95 border border-line rounded-2xl p-5 overflow-y-auto z-10 space-y-6">
-            <div>
-              <div className="text-xs text-muted">Destination</div>
-              <div className="text-xl font-bold">{result.destLoc.name}</div>
-              <div className="text-xs text-muted mt-1">
-                {result.destLoc.lat}° N, {result.destLoc.lon}° E
-              </div>
-              <div className="text-xs text-muted">
-                {result.destLoc.type} • {result.destLoc.tag}
-              </div>
-            </div>
-            <TerrainConditions analysis={result.analysis} />
-            <RouteWarnings analysis={result.analysis} />
-            <ScienceStops nearPois={result.nearPois} mode={result.mode} />
-          </aside>
-
-          <div className="absolute bottom-4 left-4 right-[362px] h-[170px] flex gap-4 z-10">
-            <RouteOverview analysis={result.analysis} />
-            <ElevationProfile profile={result.analysis.profile} />
-          </div>
-        </>
-      )}
+        <div className="rm-bottom">
+          <RouteOverview route={route} selectedStopIds={selected} />
+          <ElevationProfile route={route} />
+        </div>
+      </div>
     </div>
   )
 }
