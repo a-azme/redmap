@@ -1,9 +1,11 @@
 import { useState, useCallback } from 'react'
 import {
-  Mountain, Layers, Gem, Hexagon, Rocket, Thermometer, Wind,
+  Mountain, Layers, Gem, Hexagon, Thermometer, Wind,
   Crosshair, RotateCcw, ExternalLink, TrendingUp, MapPin,
 } from 'lucide-react'
 import MarsGlobe from '../components/map/MarsGlobe'
+import LayerThumb from '../components/map/LayerThumb'
+import LocationThumb from '../components/map/LocationThumb'
 import { useMapStore } from '../store/useMapStore'
 
 const LOCATIONS = [
@@ -56,7 +58,6 @@ const LAYERS = [
   { id: 'elevation', name: 'Elevation', sub: 'Height data (color coded)', icon: Mountain, grad: 'from-blue-600 via-green-500 to-red-600' },
   { id: 'geo', name: 'Geological Features', sub: 'Rocks, craters, formations', icon: Hexagon, grad: 'from-gray-500 to-gray-800' },
   { id: 'minerals', name: 'Minerals', sub: 'Detected mineral composition', icon: Gem, grad: 'from-purple-600 to-indigo-900' },
-  { id: 'missions', name: 'NASA Missions', sub: 'Rover tracks & observations', icon: Rocket, grad: 'from-slate-600 to-slate-900' },
   { id: 'temp', name: 'Temperature', sub: 'Surface temperature (est.)', icon: Thermometer, grad: 'from-yellow-500 via-red-500 to-blue-700' },
   { id: 'atmo', name: 'Atmosphere', sub: 'Pressure & dust', icon: Wind, grad: 'from-sky-600 to-sky-900' },
 ]
@@ -168,10 +169,7 @@ export default function LayersPage() {
       {/* Right: details */}
       <aside className={`absolute bottom-[132px] right-4 top-4 z-[1100] w-[370px] overflow-y-auto p-5 ${panel}`}>
         <div className="flex gap-4">
-          <div
-            className="h-[84px] w-[84px] shrink-0 rounded-xl"
-            style={{ background: `linear-gradient(135deg, ${selected.color}, #1a0b08)` }}
-          />
+          <LocationThumb loc={selected} className="h-[84px] w-[84px] rounded-xl" />
           <div>
             <h2 className="text-lg font-bold">{selected.name}</h2>
             <div className="text-sm text-gray-400">
@@ -242,9 +240,9 @@ export default function LayersPage() {
         </button>
       </aside>
 
-      {/* Bottom: layer thumbnails */}
+      {/* Bottom: layer thumbnails (real NASA tile) */}
       <div className={`absolute bottom-4 left-4 right-4 z-[1100] flex gap-3 overflow-x-auto p-3 ${panel}`}>
-        {LAYERS.slice(0, 6).map((l) => {
+        {LAYERS.map((l) => {
           const Icon = l.icon
           return (
             <button
@@ -254,7 +252,7 @@ export default function LayersPage() {
                 active === l.id ? 'border-red-500' : 'border-white/10 hover:border-white/30'
               }`}
             >
-              <div className={`h-[64px] bg-gradient-to-br ${l.grad}`} />
+              <LayerThumb layerId={l.id} grad={l.grad} />
               <div className="flex items-center gap-2 px-3 py-2 text-sm">
                 <Icon size={14} /> {l.name.replace('Geological Features', 'Geological')}
               </div>

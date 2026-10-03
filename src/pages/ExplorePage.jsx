@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ChevronRight, Globe, Map, MapPin, Truck, Bookmark } from 'lucide-react'
 import MarsGlobe from '../components/map/MarsGlobe'
+import LocationThumb from '../components/map/LocationThumb'
 import locations from '../data/locations.json'
 import { useMapStore } from '../store/useMapStore'
 
@@ -30,7 +31,7 @@ export default function ExplorePage() {
       </div>
 
       {/* Left menu */}
-      <aside className={`absolute left-4 top-4 w-[200px] py-2 ${panel}`}>
+      <aside className={`absolute left-4 top-4 z-10 w-[200px] py-2 ${panel}`}>
         {menu.map(({ label, icon: Icon }) => (
           <button
             key={label}
@@ -45,14 +46,14 @@ export default function ExplorePage() {
       </aside>
 
       {/* LAT / LON / ALT */}
-      <div className={`absolute bottom-6 left-4 flex gap-6 px-5 py-3 text-sm ${panel}`}>
+      <div className={`absolute bottom-6 left-4 z-10 flex gap-6 px-5 py-3 text-sm ${panel}`}>
         <span><span className="text-gray-400">LAT</span> {selected.lat}° N</span>
         <span><span className="text-gray-400">LON</span> {selected.lon}° E</span>
         <span><span className="text-gray-400">ALT</span> {selected.elevation} km</span>
       </div>
 
       {/* Right: Explore Mars */}
-      <aside className={`absolute bottom-4 right-4 top-4 w-[420px] overflow-y-auto p-5 ${panel}`}>
+      <aside className={`absolute bottom-4 right-4 top-4 z-10 w-[420px] overflow-y-auto p-5 ${panel}`}>
         <h2 className="text-xl font-bold">Explore Mars</h2>
         <p className="mb-4 text-sm text-gray-400">
           Discover locations, explore terrain, and plan your journey.
@@ -81,10 +82,7 @@ export default function ExplorePage() {
                 selected.id === loc.id ? 'bg-white/5' : ''
               }`}
             >
-              <div
-                className="h-16 w-16 shrink-0 rounded-lg"
-                style={{ background: `linear-gradient(135deg, ${loc.color}, #1a0b08)` }}
-              />
+              <LocationThumb loc={loc} className="h-16 w-16 rounded-lg" />
               <div className="flex-1">
                 <div className="font-semibold">{loc.name}</div>
                 <div className="text-xs text-gray-400">{loc.type} • {loc.tag}</div>
