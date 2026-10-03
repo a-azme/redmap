@@ -22,3 +22,11 @@ html, body, #root {
 
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-thumb { background: #2a3442; border-radius: 3px; }
+
+.redmap-tip {
+  background: rgba(0, 0, 0, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 12px;
+}
+.redmap-tip::before { display: none; }
