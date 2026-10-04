@@ -1,149 +1,308 @@
-import { useEffect, useRef } from 'react';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
+import { useEffect, useRef, useState } from 'react'
+import * as Cesium from 'cesium'
+import 'cesium/Build/Cesium/Widgets/widgets.css'
+import { Plus, Minus, Crosshair, RotateCcw } from 'lucide-react'
+import { TILE_LAYERS } from '../../services/layerService'
+import { MARS, at, toLon, applyLayer } from '../../services/tiles'
+import { LOCATIONS } from './routeUtils'
 
-const TREK = 'https://trek.nasa.gov/tiles/Mars/EQ';
-// Same layer for terrain + satellite for now; swap names here if you want other Trek layers.
-// ext = tile file extension, maxNative = deepest zoom the service has (verify, see notes)
-const LAYERS = {
-  terrain:   { layer: 'Mars_Viking_MDIM21_ClrMosaic_global_232m', ext: 'jpg', maxNative: 7 },
-  satellite: { layer: 'Mars_Viking_MDIM21_ClrMosaic_global_232m', ext: 'jpg', maxNative: 7 },
-  elevation: { layer: 'Mars_MGS_MOLA_ClrShade_merge_global_463m',  ext: 'png', maxNative: 6 },
-};
-const tileUrl = (v) => `${TREK}/${LAYERS[v].layer}/1.0.0/default/default028mm/{z}/{y}/{x}.${LAYERS[v].ext}`;
+window.CESIUM_BASE_URL = '/cesium/'
 
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const norm = (lon) => (lon > 180 ? lon - 360 : lon); // 0..360 -> -180..180 (Trek tiles are centred on 0°)
+const BLUE = Cesium.Color.fromCssColorString('#2bb5f5')
+const HOME = () => at(77, 18, 1.4e7)
 
-function unwrap(points) {
-  let prev = null;
-  return points.map((p) => {
-    let lon = norm(p.lon);
+// Rectangle around the route with extra room so the side panels don't cover it (used in 2D)
+function fitRect(route) {
+  let prev = null
+  const lons = route.path.map((p) => {
+    let l = toLon(p.lon)
     if (prev !== null) {
-      while (lon - prev > 180) lon -= 360;
-      while (prev - lon > 180) lon += 360;
+      while (l - prev > 180) l -= 360
+      while (prev - l > 180) l += 360
     }
-    prev = lon;
-    return [p.lat, lon];
-  });
+    prev = l
+    return l
+  })
+  const lats = route.path.map((p) => p.lat)
+  let w = Math.min(...lons), e = Math.max(...lons)
+  let s = Math.min(...lats), n = Math.max(...lats)
+  const dx = Math.max(e - w, 4), dy = Math.max(n - s, 3)
+  w -= dx * 0.9; e += dx * 0.9
+  s = Math.max(-89, s - dy * 0.9); n = Math.min(89, n + dy * 0.45)
+  if (e - w >= 350) return Cesium.Rectangle.fromDegrees(-180, -89, 180, 89)
+  const nd = (d) => Cesium.Math.toDegrees(Cesium.Math.negativePiToPi(Cesium.Math.toRadians(d)))
+  return Cesium.Rectangle.fromDegrees(nd(w), s, nd(e), n)
 }
 
-const pin = (cls, label, icon = '', always = false) =>
-  L.divIcon({
-    className: 'rm-pinwrap',
-    iconSize: [0, 0],
-    html: `<div class="rm-pin rm-pin--${cls}${always ? ' is-always' : ''}"><span class="rm-pin__dot">${icon}</span><span class="rm-pin__lab">${esc(label)}</span></div>`,
-  });
+// 3D: oblique "Google Earth" look at the route. 2D: flat fit.
+function fitView(viewer, route, duration = 1.8) {
+  if (!route || !viewer || viewer.isDestroyed()) return
+  if (viewer.scene.mode === Cesium.SceneMode.SCENE3D) {
+    const sphere = Cesium.BoundingSphere.fromPoints(route.path.map((p) => at(p.lon, p.lat)))
+    viewer.camera.flyToBoundingSphere(sphere, {
+      duration,
+      offset: new Cesium.HeadingPitchRange(
+        0,
+        Cesium.Math.toRadians(-55),
+        Math.min(4e7, Math.max(sphere.radius * 3.4, 4e4))
+      ),
+    })
+  } else {
+    viewer.camera.flyTo({ destination: fitRect(route), duration })
+  }
+}
 
-export default function RouteMap({ route, view = 'terrain', selectedStopIds = [] }) {
-  const elRef = useRef(null);
-  const ref = useRef({});
-  const lastRoute = useRef(null);
+export default function RouteMap({ route, layer = 'terrain', mode = '3D', selectedStopIds = [] }) {
+  const elRef = useRef(null)
+  const viewerRef = useRef(null)
+  const routeRef = useRef(route)
+  const lastRoute = useRef(null)
+  const hoverOnly = useRef(new Set())
+  const [status, setStatus] = useState('loading')
+  const [used, setUsed] = useState('')
 
-  /* ---- create the map once ---- */
+  routeRef.current = route
+  const cfg = TILE_LAYERS[layer] || TILE_LAYERS.terrain
+
+  /* ---- 1. viewer (once) ---- */
   useEffect(() => {
-    const map = L.map(elRef.current, {
-      crs: L.CRS.EPSG4326,       // Trek EQ tiles: 2x1 tiles at zoom 0
-      center: [10, 0],
-      zoom: 2,
-      minZoom: 1,
-      maxZoom: 10,
-      zoomSnap: 0.25,
-      zoomControl: false,
-      attributionControl: true,
-    });
-    map.attributionControl.setPrefix(false);
+    const viewer = new Cesium.Viewer(elRef.current, {
+      baseLayer: false,
+      baseLayerPicker: false,
+      geocoder: false,
+      homeButton: false,
+      sceneModePicker: false,
+      navigationHelpButton: false,
+      animation: false,
+      timeline: false,
+      fullscreenButton: false,
+      infoBox: false,
+      selectionIndicator: false,
+      skyBox: false,
+      skyAtmosphere: false,
+      mapProjection: new Cesium.GeographicProjection(MARS), // so 2D uses Mars, not Earth
+      mapMode2D: Cesium.MapMode2D.INFINITE_SCROLL,          // viewer option (scene.mapMode2D is read-only)
+    })
+    const scene = viewer.scene
+    scene.backgroundColor = Cesium.Color.fromCssColorString('#07090d')
+    scene.globe.baseColor = Cesium.Color.fromCssColorString('#2a1208')
+    scene.globe.showGroundAtmosphere = false
+    scene.globe.enableLighting = false
+    if (scene.sun) scene.sun.show = false
+    if (scene.moon) scene.moon.show = false
 
-    const tiles = L.tileLayer(tileUrl('terrain'), {
-      tileSize: 256,
-      maxNativeZoom: LAYERS.terrain.maxNative,
-      maxZoom: 10,
-      attribution: 'NASA/JPL-Caltech/USGS · Mars Trek',
-    }).addTo(map);
-    tiles.once('tileerror', () =>
-      console.warn('RouteMap: a Mars Trek tile failed to load. Check the layer name / file extension in LAYERS.'));
+    const ctrl = scene.screenSpaceCameraController
+    ctrl.minimumZoomDistance = 500
+    ctrl.maximumZoomDistance = 4e7
+    ctrl.enableTilt = true // 3D: right-drag / Ctrl+drag / middle-drag tilts like Google Earth
 
-    const group = L.layerGroup().addTo(map);
-    ref.current = { map, tiles, group, raf: 0, home: { center: [10, 0], zoom: 2 }, fit: null };
+    viewer.camera.setView({ destination: HOME() })
 
-    return () => { cancelAnimationFrame(ref.current.raf); map.remove(); ref.current = {}; };
-  }, []);
+    // hover labels for hazards / stops / context locations
+    const handler = new Cesium.ScreenSpaceEventHandler(scene.canvas)
+    let hovered = null
+    handler.setInputAction((m) => {
+      const p = scene.pick(m.endPosition)
+      const ent = p && p.id && p.id.label ? p.id : null
+      if (hovered && hovered !== ent && hoverOnly.current.has(hovered.id)) hovered.label.show = false
+      if (ent && hoverOnly.current.has(ent.id)) ent.label.show = true
+      scene.canvas.style.cursor = ent ? 'pointer' : 'grab'
+      hovered = ent
+    }, Cesium.ScreenSpaceEventType.MOUSE_MOVE)
 
-  /* ---- switch base layer ---- */
-  useEffect(() => {
-    const { tiles } = ref.current;
-    if (!tiles) return;
-    tiles.setUrl(tileUrl(view));
-    tiles.options.maxNativeZoom = LAYERS[view].maxNative;
-    tiles.redraw();
-  }, [view]);
-
-  /* ---- draw route ---- */
-  useEffect(() => {
-    const c = ref.current;
-    if (!c.map) return;
-    cancelAnimationFrame(c.raf);
-    c.group.clearLayers();
-    if (!route) return;
-
-    const latlngs = unwrap(route.path);
-    const centerLon = (Math.min(...latlngs.map((p) => p[1])) + Math.max(...latlngs.map((p) => p[1]))) / 2;
-    const place = (lat, lon) => {            // put a marker on the same world copy as the route
-      let l = norm(lon);
-      while (l - centerLon > 180) l -= 360;
-      while (centerLon - l > 180) l += 360;
-      return [lat, l];
-    };
-
-    // glow + dashed line
-    L.polyline(latlngs, { color: '#2bb5f5', weight: 12, opacity: 0.2, interactive: false }).addTo(c.group);
-    L.polyline(latlngs, { color: '#2bb5f5', weight: 4, dashArray: '10 8', className: 'rm-dashline', interactive: false }).addTo(c.group);
-
-    // hazards
-    route.warnings
-      .filter((w) => w.severity !== 'info' && w.toKm - w.fromKm < route.distanceKm - 1)
-      .forEach((w) => L.marker(place(w.lat, w.lon), { icon: pin(w.severity, w.title, '▲') }).addTo(c.group));
-
-    // science stops
-    route.stops.forEach((s) => {
-      const on = selectedStopIds.includes(s.id);
-      L.marker(place(s.lat, s.lon), { icon: pin(on ? 'stop-on' : 'stop', s.title, '', on), zIndexOffset: 500 }).addTo(c.group);
-    });
-
-    // start / destination
-    L.marker(latlngs[0], { icon: pin('start', `Start: ${route.start.name}`, '', true), zIndexOffset: 1000 }).addTo(c.group);
-    L.marker(latlngs[latlngs.length - 1], { icon: pin('end', `Destination: ${route.end.name}`, '', true), zIndexOffset: 1000 }).addTo(c.group);
-
-    // rover dot travelling along the route
-    const rover = L.circleMarker(latlngs[0], { radius: 5, color: '#fff', weight: 2, fillColor: '#2bb5f5', fillOpacity: 1, interactive: false }).addTo(c.group);
-    const t0 = performance.now();
-    const step = (now) => {
-      const f = (((now - t0) / 1000) * 0.06) % 1;
-      const x = f * (latlngs.length - 1), i = Math.floor(x), k = x - i;
-      const a = latlngs[i], b = latlngs[Math.min(i + 1, latlngs.length - 1)];
-      rover.setLatLng([a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k]);
-      c.raf = requestAnimationFrame(step);
-    };
-    c.raf = requestAnimationFrame(step);
-
-    // frame the route in the free area between the side panels (only for a NEW route)
-    c.fit = L.latLngBounds(latlngs);
-    if (lastRoute.current !== route) {
-      lastRoute.current = route;
-      c.map.flyToBounds(c.fit, { paddingTopLeft: [340, 90], paddingBottomRight: [380, 250], maxZoom: 7, duration: 1.2 });
+    viewerRef.current = viewer
+    return () => {
+      handler.destroy()
+      viewer.destroy()
+      viewerRef.current = null
     }
-  }, [route, selectedStopIds]);
+  }, [])
 
-  const m = () => ref.current.map;
+  /* ---- 2. base texture (terrain / satellite / elevation) ---- */
+  useEffect(() => {
+    const viewer = viewerRef.current
+    if (!viewer) return
+    let cancelled = false
+    setStatus('loading')
+    setUsed('')
+    applyLayer(viewer, cfg, layer, {
+      cancelled: () => cancelled,
+      onStatus: (s) => !cancelled && setStatus(s),
+      onSource: (n) => !cancelled && setUsed(n),
+    })
+    return () => { cancelled = true }
+  }, [layer]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ---- 3. route + markers ---- */
+  useEffect(() => {
+    const viewer = viewerRef.current
+    if (!viewer) return
+    viewer.entities.removeAll()
+    hoverOnly.current = new Set()
+    const tracked = []
+
+    const addPoint = ({ id, name, lon, lat, color, size = 11, label = true, always = false, dy = 0, maxDist }) => {
+      const position = at(lon, lat)
+      if (!always) hoverOnly.current.add(id)
+      const ent = viewer.entities.add({
+        id,
+        position,
+        point: {
+          pixelSize: size,
+          color: Cesium.Color.fromCssColorString(color),
+          outlineColor: Cesium.Color.WHITE,
+          outlineWidth: 2,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+        label: label && {
+          text: name,
+          show: always,
+          font: '13px Inter, sans-serif',
+          fillColor: Cesium.Color.WHITE,
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 3,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
+          pixelOffset: new Cesium.Cartesian2(14, dy),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          distanceDisplayCondition: maxDist ? new Cesium.DistanceDisplayCondition(0, maxDist) : undefined,
+        },
+      })
+      tracked.push({ ent, position })
+    }
+
+    // other known locations from locations.json (context)
+    LOCATIONS.forEach((l) => {
+      if (route && (l.id === route.start.id || l.id === route.end.id)) return
+      addPoint({ id: 'ctx-' + l.id, name: l.name, lon: l.lon, lat: l.lat, color: l.color, size: 8, maxDist: 8e6 })
+    })
+
+    if (route) {
+      const pos = route.path.map((p) => at(p.lon, p.lat, 300))
+
+      viewer.entities.add({
+        polyline: {
+          positions: pos,
+          width: 12,
+          arcType: Cesium.ArcType.GEODESIC,
+          material: new Cesium.PolylineGlowMaterialProperty({ glowPower: 0.22, color: BLUE }),
+        },
+      })
+      viewer.entities.add({
+        polyline: {
+          positions: pos,
+          width: 3,
+          arcType: Cesium.ArcType.GEODESIC,
+          material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.WHITE, dashLength: 16 }),
+        },
+      })
+
+      route.warnings
+        .filter((w) => w.severity !== 'info' && w.toKm - w.fromKm < route.distanceKm - 1)
+        .forEach((w) =>
+          addPoint({
+            id: 'w-' + w.id, name: '▲ ' + w.title, lon: w.lon, lat: w.lat, size: 9,
+            color: w.severity === 'critical' ? '#ff4d4d' : '#f5a524',
+          }))
+
+      route.stops.forEach((s) => {
+        const on = selectedStopIds.includes(s.id)
+        addPoint({
+          id: 's-' + s.id, name: s.title, lon: s.lon, lat: s.lat,
+          color: on ? '#4be08a' : '#f5c518', size: on ? 13 : 10, always: on,
+        })
+      })
+
+      addPoint({ id: 'start', name: `Start: ${route.start.name}`, lon: route.start.lon, lat: route.start.lat, color: '#2ecc71', size: 14, always: true })
+      addPoint({ id: 'end', name: `Destination: ${route.end.name}`, lon: route.end.lon, lat: route.end.lat, color: '#e5322d', size: 14, always: true, dy: 16 })
+
+      // rover marker travelling along the route
+      const t0 = performance.now()
+      viewer.entities.add({
+        position: new Cesium.CallbackProperty(() => {
+          const f = (((performance.now() - t0) / 1000) * 0.05) % 1
+          const x = f * (pos.length - 1), i = Math.floor(x)
+          return Cesium.Cartesian3.lerp(pos[i], pos[Math.min(i + 1, pos.length - 1)], x - i, new Cesium.Cartesian3())
+        }, false),
+        point: {
+          pixelSize: 9, color: Cesium.Color.WHITE, outlineColor: BLUE, outlineWidth: 3,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      })
+
+      // frame the route only when a NEW route is planned
+      if (lastRoute.current !== route) {
+        lastRoute.current = route
+        fitView(viewer, route)
+      }
+    }
+
+    // hide markers on the far side of the planet (3D only)
+    const occluder = new Cesium.EllipsoidalOccluder(MARS, viewer.camera.positionWC)
+    const onPreRender = () => {
+      const is3D = viewer.scene.mode === Cesium.SceneMode.SCENE3D
+      occluder.cameraPosition = viewer.camera.positionWC
+      tracked.forEach(({ ent, position }) => { ent.show = !is3D || occluder.isPointVisible(position) })
+    }
+    viewer.scene.preRender.addEventListener(onPreRender)
+    return () => { if (!viewer.isDestroyed()) viewer.scene.preRender.removeEventListener(onPreRender) }
+  }, [route, selectedStopIds])
+
+  /* ---- 4. 3D <-> 2D ---- */
+  useEffect(() => {
+    const viewer = viewerRef.current
+    if (!viewer) return
+    const scene = viewer.scene
+    const want = mode === '2D' ? Cesium.SceneMode.SCENE2D : Cesium.SceneMode.SCENE3D
+    if (scene.mode === want) return
+    const done = () => {
+      scene.morphComplete.removeEventListener(done)
+      fitView(viewer, routeRef.current, 1.2)
+    }
+    scene.morphComplete.addEventListener(done)
+    if (mode === '2D') scene.morphTo2D(1.2)
+    else scene.morphTo3D(1.2)
+  }, [mode])
+
+  const zoom = (dir) => {
+    const cam = viewerRef.current?.camera
+    if (!cam) return
+    const h = cam.positionCartographic.height
+    dir > 0 ? cam.zoomIn(h * 0.5) : cam.zoomOut(h * 0.7)
+  }
+  const recenter = () => fitView(viewerRef.current, routeRef.current)
+  const reset = () => {
+    const v = viewerRef.current
+    if (!v) return
+    if (v.scene.mode === Cesium.SceneMode.SCENE3D) v.camera.flyTo({ destination: HOME(), duration: 1.5 })
+    else v.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(-180, -89, 180, 89), duration: 1.5 })
+  }
+
   return (
     <div className="rm-map">
-      <div ref={elRef} className={`rm-leaflet view-${view}`} />
+      <div ref={elRef} style={{ width: '100%', height: '100%' }} />
+
       <div className="rm-ctrls">
-        <button type="button" onClick={() => m()?.zoomIn()} title="Zoom in">+</button>
-        <button type="button" onClick={() => m()?.zoomOut()} title="Zoom out">−</button>
-        <button type="button" onClick={() => ref.current.fit && m().flyToBounds(ref.current.fit, { paddingTopLeft: [340, 90], paddingBottomRight: [380, 250], maxZoom: 7 })} title="Centre on route">◎</button>
-        <button type="button" onClick={() => m()?.flyTo(ref.current.home.center, ref.current.home.zoom)} title="Whole planet">⟳</button>
+        <button type="button" onClick={() => zoom(1)} title="Zoom in"><Plus size={18} /></button>
+        <button type="button" onClick={() => zoom(-1)} title="Zoom out"><Minus size={18} /></button>
+        <button type="button" onClick={recenter} title="Centre on route"><Crosshair size={18} /></button>
+        <button type="button" onClick={reset} title="Whole planet"><RotateCcw size={18} /></button>
+      </div>
+
+      <div className="rm-status">
+        <b>{cfg.title || layer}</b>
+        {cfg.legend && (
+          <div className="rm-legend">
+            <div style={{ height: 8, borderRadius: 99, background: cfg.legend.bar }} />
+            <div className="rm-legend__labels">{cfg.legend.labels.map((l) => <span key={l}>{l}</span>)}</div>
+          </div>
+        )}
+        <div className={status === 'error' ? 'rm-status__err' : 'rm-status__src'}>
+          {status === 'error'
+            ? 'No tile source worked for this layer. Open F12 → Console and look for the [RedMap] lines.'
+            : used ? `NASA Mars Trek · ${used}` : 'Checking NASA tile sources…'}
+        </div>
       </div>
     </div>
-  );
+  )
 }

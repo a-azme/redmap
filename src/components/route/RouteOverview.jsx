@@ -1,4 +1,5 @@
 import { totalSols } from './routeUtils';
+import LocationThumb from '../map/LocationThumb'
 
 export default function RouteOverview({ route, selectedStopIds = [] }) {
   if (!route) {
@@ -21,7 +22,7 @@ export default function RouteOverview({ route, selectedStopIds = [] }) {
 
   return (
     <section className="rm-card rm-overview">
-      {route.end.image && (
+     {/*{route.end.image && (
         <img
           className="rm-overview__img"
           src={route.end.image}
@@ -41,8 +42,12 @@ export default function RouteOverview({ route, selectedStopIds = [] }) {
           {stats.map(([k, v]) => (
             <div key={k}><dt>{k}</dt><dd>{v}</dd></div>
           ))}
+
+          
         </dl>
       </div>
+      */}
+      <LocationThumb loc={route.end} className="h-[90px] w-[110px] rounded-lg" />
     </section>
   );
 }
