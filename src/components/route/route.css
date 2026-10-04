@@ -167,43 +167,24 @@
 
 
 /* ============ 3D globe ============ */
-.rm-globe { position: absolute; inset: 0; z-index: 1; overflow: hidden;
-  background: radial-gradient(ellipse at 50% 40%, #1a1117 0%, #07070b 75%); }
-.rm-globe__canvas { position: absolute; inset: 0; transition: filter .3s; }
-.rm-globe__canvas canvas { display: block; cursor: grab; }
-.rm-globe__canvas canvas:active { cursor: grabbing; }
-.rm-globe__canvas.view-satellite { filter: contrast(1.15) saturate(1.3); }
-.rm-globe__canvas.view-elevation { filter: grayscale(1) contrast(1.3) sepia(.7) hue-rotate(170deg) saturate(2.2); }
-
-.rm-globe__markers { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-.rm-m { position: absolute; left: 0; top: 0; pointer-events: auto; will-change: transform; }
-.rm-m:hover { z-index: 5; }
-.rm-m__dot { position: absolute; transform: translate(-50%, -50%); width: 16px; height: 16px; border-radius: 50%;
-  border: 2px solid #fff; display: grid; place-items: center; font-size: 9px; line-height: 1; cursor: pointer; box-sizing: border-box; }
-.rm-m__lab { position: absolute; left: 14px; top: -12px; white-space: nowrap; display: none;
-  background: rgba(10, 10, 14, .88); color: #fff; padding: 4px 10px; border-radius: 6px; font: 600 12px system-ui, sans-serif; }
-.rm-m.is-always .rm-m__lab, .rm-m:hover .rm-m__lab { display: block; }
-
-.rm-m--start .rm-m__dot { background: #2ecc71; width: 20px; height: 20px; }
-.rm-m--start .rm-m__lab { color: #4be08a; }
-.rm-m--end .rm-m__dot { background: #e23b2e; width: 20px; height: 20px; }
-.rm-m--end .rm-m__lab { color: #ff7b72; }
-.rm-m--stop .rm-m__dot { background: #f5c518; border-color: #1b1b1b; }
-.rm-m--stop .rm-m__lab { color: #f5c518; }
-.rm-m--stop-on .rm-m__dot { background: #4be08a; border-color: #1b1b1b; width: 20px; height: 20px; }
-.rm-m--stop-on .rm-m__lab { color: #4be08a; }
-.rm-m--caution .rm-m__dot, .rm-m--critical .rm-m__dot { background: none; border: 0; font-size: 16px; width: 18px; height: 18px; text-shadow: 0 0 4px #000; }
-.rm-m--caution .rm-m__dot { color: #f5a524; }
-.rm-m--critical .rm-m__dot { color: #ff4d4d; }
-.rm-m--caution .rm-m__lab { color: #f5a524; }
-.rm-m--critical .rm-m__lab { color: #ff4d4d; }
+.rm-map { position: absolute; inset: 0; z-index: 1; }
+.rm-map .cesium-viewer, .rm-map .cesium-widget, .rm-map canvas { width: 100%; height: 100%; }
 
 .rm-ctrls { position: absolute; top: 90px; right: 362px; display: flex; flex-direction: column; gap: 8px; z-index: 3; }
-.rm-ctrls button { width: 42px; height: 42px; border-radius: 10px; border: 1px solid rgba(255,255,255,.12);
-  background: rgba(12, 14, 20, .88); color: #f1f1f4; font-size: 20px; cursor: pointer; }
-.rm-ctrls button:hover { background: rgba(226, 59, 46, .85); }
+.rm-ctrls button { width: 42px; height: 42px; border-radius: 12px; border: 1px solid rgba(255,255,255,.12);
+  background: rgba(12,14,20,.88); color: #f1f1f4; cursor: pointer; display: grid; place-items: center; }
+.rm-ctrls button:hover { background: rgba(226,59,46,.85); }
 
+.rm-layout .rm-topbar { top: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; }
+.rm-topbar .rm-viewtoggle { position: static; top: auto; left: auto; transform: none; }
 
+.rm-status { position: absolute; top: 72px; left: 50%; transform: translateX(-50%); z-index: 3; min-width: 260px; max-width: 360px;
+  background: rgba(12,14,20,.82); border: 1px solid rgba(255,255,255,.09); border-radius: 12px; padding: 8px 12px;
+  color: #f1f1f4; font: 12px system-ui, sans-serif; pointer-events: none; }
+.rm-status__src { color: #9aa0ad; margin-top: 4px; }
+.rm-status__err { color: #ff7b72; margin-top: 4px; }
+.rm-legend { margin-top: 6px; }
+.rm-legend__labels { display: flex; justify-content: space-between; color: #9aa0ad; font-size: 11px; margin-top: 2px; }
 
 /* ============ Leaflet map ============ */
 .rm-map { position: absolute; inset: 0; z-index: 1; }

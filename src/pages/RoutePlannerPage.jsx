@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import RouteMap from "../components/route/RouteMap";
-import RouteGlobe from '../components/route/RouteGlobe'
+import RouteMap from '../components/route/RouteMap'
 import RoutePanel from '../components/route/RoutePanel'
 import RouteOverview from '../components/route/RouteOverview'
 import ElevationProfile from '../components/route/ElevationProfile'
@@ -9,34 +8,40 @@ import RouteWarnings from '../components/route/RouteWarnings'
 import ScienceStops from '../components/route/ScienceStops'
 import DestinationInfo from '../components/route/DestinationInfo'
 
+// must match keys in services/layerService TILE_LAYERS
+const LAYERS = ['terrain', 'satellite', 'elevation']
+const MODES = ['3D', '2D']
+const cap = (s) => s[0].toUpperCase() + s.slice(1)
+
 export default function RoutePlannerPage() {
   const navigate = useNavigate()
   const [route, setRoute] = useState(null)
   const [selected, setSelected] = useState([])
-  const [view, setView] = useState('terrain') // terrain | satellite | elevation
+  const [layer, setLayer] = useState('terrain')
+  const [mode, setMode] = useState('3D')
 
   const toggleStop = (id) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
 
-  const handleRouteChange = (r) => {
-    setRoute(r)
-    setSelected([])
-  }
-
   return (
     // adjust 90px to your navbar height
     <div style={{ position: 'relative', height: 'calc(100vh - 90px)', overflow: 'hidden' }}>
-      <RouteMap route={route} view={view} selectedStopIds={selected} />
+      <RouteMap route={route} layer={layer} mode={mode} selectedStopIds={selected} />
 
       <div className="rm-layout">
-        <RoutePanel onBack={() => navigate('/')} onRouteChange={handleRouteChange} />
+        <RoutePanel onBack={() => navigate('/')} onRouteChange={(r) => { setRoute(r); setSelected([]) }} />
 
-        <div className="rm-viewtoggle">
-          {['terrain', 'satellite', 'elevation'].map((v) => (
-            <button key={v} className={view === v ? 'is-active' : ''} onClick={() => setView(v)}>
-              {v[0].toUpperCase() + v.slice(1)}
-            </button>
-          ))}
+        <div className="rm-topbar">
+          <div className="rm-viewtoggle">
+            {LAYERS.map((v) => (
+              <button key={v} className={layer === v ? 'is-active' : ''} onClick={() => setLayer(v)}>{cap(v)}</button>
+            ))}
+          </div>
+          <div className="rm-viewtoggle">
+            {MODES.map((m) => (
+              <button key={m} className={mode === m ? 'is-active' : ''} onClick={() => setMode(m)}>{m}</button>
+            ))}
+          </div>
         </div>
 
         <div className="rm-right">
