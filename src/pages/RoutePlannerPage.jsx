@@ -23,10 +23,11 @@ export default function RoutePlannerPage() {
   const toggleStop = (id) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
 
-  return (
-    // adjust 90px to your navbar height
-    <div style={{ position: 'relative', height: 'calc(100vh - 90px)', overflow: 'hidden' }}>
-      <RouteMap route={route} layer={layer} mode={mode} selectedStopIds={selected} />
+    return (
+    <div className="rm-page">
+      <div className="rm-mapwrap">
+        <RouteMap route={route} layer={layer} mode={mode} selectedStopIds={selected} />
+      </div>
 
       <div className="rm-layout">
         <RoutePanel onBack={() => navigate('/')} onRouteChange={(r) => { setRoute(r); setSelected([]) }} />

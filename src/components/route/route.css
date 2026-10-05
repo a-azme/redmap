@@ -27,11 +27,6 @@
 .rm-layout .rm-right { top: 16px; right: 16px; width: 330px; display: flex; flex-direction: column; gap: 10px; max-height: calc(100% - 32px); overflow-y: auto; }
 .rm-layout .rm-bottom { bottom: 16px; left: 332px; right: 362px; display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; }
 .rm-layout .rm-viewtoggle { top: 16px; left: 50%; transform: translateX(-50%); }
-@media (max-width: 1100px) {
-  .rm-layout { position: static; display: flex; flex-direction: column; gap: 10px; pointer-events: auto; }
-  .rm-layout > * { position: static !important; width: auto !important; transform: none !important; }
-  .rm-layout .rm-bottom { display: flex; flex-direction: column; }
-}
 
 /* ============ panel ============ */
 .rm-panel { width: 300px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
@@ -83,7 +78,7 @@
 .rm-stats dd { margin: 0; font-weight: 700; }
 
 /* ============ elevation profile ============ */
-.rm-profile__svg { width: 100%; height: auto; display: block; }
+.rm-profile__svg { width: 100%; height: auto; display: block; touch-action: pan-y; }
 .rm-grid { stroke: var(--line); }
 .rm-axis { fill: var(--muted); font-size: 9px; }
 .rm-profile__area { fill: rgba(226, 59, 46, 0.18); }
@@ -218,3 +213,20 @@
 .rm-pin--critical .rm-pin__dot { color: #ff4d4d; }
 .rm-pin--caution .rm-pin__lab { color: #f5a524; }
 .rm-pin--critical .rm-pin__lab { color: #ff4d4d; }
+/* ============ responsive ============ */
+.rm-page { position: relative; height: 100%; overflow: hidden; }
+.rm-mapwrap { position: absolute; inset: 0; }
+
+@media (max-width: 1279px) {
+  .rm-page { overflow-y: auto; overflow-x: hidden; }
+  .rm-mapwrap { position: relative; inset: auto; height: 55vh; min-height: 340px; }
+  .rm-layout { position: static; display: flex; flex-direction: column; gap: 10px; padding: 10px; pointer-events: auto; }
+  .rm-layout > * { position: static !important; width: auto !important; transform: none !important; max-height: none !important; }
+  .rm-layout .rm-bottom { display: flex; flex-direction: column; order: 1; }
+  .rm-layout .rm-right { overflow: visible; order: 2; }
+  .rm-layout .rm-topbar { position: absolute !important; top: 10px; left: 10px; right: 10px; z-index: 5; flex-wrap: wrap; justify-content: center; }
+  .rm-viewtoggle button { padding: 8px 12px; font-size: 13px; }
+  .rm-ctrls { top: auto; bottom: 14px; right: 10px; }
+  .rm-status { top: auto; bottom: 10px; left: 10px; right: 64px; transform: none; min-width: 0; max-width: none; }
+  .rm-axis { font-size: 13px; }
+}
