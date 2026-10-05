@@ -115,9 +115,9 @@ export default function SciencePage() {
   const togglePlan = (id) => setPlan((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]))
 
   return (
-    <div className="grid h-[calc(100vh-82px)] grid-cols-[340px_1fr_340px] gap-4 p-4 text-white">
+    <div className="grid h-full grid-cols-1 content-start gap-4 overflow-y-auto p-3 text-white xl:grid-cols-[340px_1fr_340px] xl:grid-rows-1 xl:overflow-hidden xl:p-4">
       {/* Left: route, filters, stops */}
-      <aside className="flex min-h-0 flex-col rounded-2xl border border-white/10 bg-[#0b0e13] p-4">
+      <aside className="flex flex-col rounded-2xl border border-white/10 bg-[#0b0e13] p-4 xl:min-h-0">
         <h2 className="text-lg font-semibold">Science Along the Way</h2>
         <p className="mt-1 text-xs text-white/50">Pick a route and see which science sites lie close enough to visit safely.</p>
 
@@ -146,7 +146,7 @@ export default function SciencePage() {
         </div>
 
         <h3 className="mt-4 text-sm font-semibold text-red-400">Science stops ({list.length})</h3>
-        <div className="mt-2 flex-1 space-y-2 overflow-y-auto pr-1">
+        <div className="mt-2 max-h-[320px] flex-1 space-y-2 overflow-y-auto pr-1 xl:max-h-none">
           {list.length === 0 && <p className="text-xs text-white/50">No stops in this corridor. Widen it or enable more categories.</p>}
           {list.map((p, i) => (
             <button key={p.id} onClick={() => setSelId(p.id)}
@@ -164,8 +164,8 @@ export default function SciencePage() {
       </aside>
 
       {/* Center: route map */}
-      <main className="relative min-h-0 overflow-hidden rounded-2xl border border-white/10 bg-[#07090c]">
-        <svg viewBox={`0 0 ${W} ${H}`} className="h-full w-full" preserveAspectRatio="xMidYMid meet">
+      <main className="relative h-[420px] overflow-auto rounded-2xl border border-white/10 bg-[#07090c] xl:h-auto xl:min-h-0 xl:overflow-hidden">
+        <svg viewBox={`0 0 ${W} ${H}`} className="h-full w-full" className="h-full w-full min-w-[640px] xl:min-w-0" preserveAspectRatio="xMidYMid meet">
           <polyline points={pts.map((p) => `${sx(p.x)},${sy(p.y)}`).join(' ')} fill="none"
             stroke="rgba(255,90,79,0.12)" strokeWidth={corridor * 2 * scale} strokeLinecap="round" strokeLinejoin="round" />
           <polyline points={pts.map((p) => `${sx(p.x)},${sy(p.y)}`).join(' ')} fill="none"
@@ -192,13 +192,13 @@ export default function SciencePage() {
           </g>
           <text x={W - 28} y="30" fontSize="12" fill="rgba(255,255,255,0.7)" textAnchor="middle">N ↑</text>
         </svg>
-        <div className="pointer-events-none absolute right-3 bottom-3 rounded-lg bg-black/50 px-3 py-1.5 text-[11px] text-white/60">
+        <div className="pointer-events-none absolute right-3 bottom-3 hidden rounded-lg bg-black/50 px-3 py-1.5 text-[11px] text-white/60 md:block">
           Local route map · positions approximate
         </div>
       </main>
 
       {/* Right: detail and plan */}
-      <aside className="min-h-0 space-y-4 overflow-y-auto rounded-2xl border border-white/10 bg-[#0b0e13] p-4">
+      <aside className="space-y-4 rounded-2xl border border-white/10 bg-[#0b0e13] p-4 xl:min-h-0 xl:overflow-y-auto">
         {sel ? (
           <div>
             <div className="flex items-center justify-between gap-2">
