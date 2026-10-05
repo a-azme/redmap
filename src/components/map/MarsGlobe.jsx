@@ -303,15 +303,15 @@ export default function MarsGlobe({ locations, focus, onSelect, layer }) {
     <div className="relative isolate h-full w-full">
       <div ref={elRef} className="h-full w-full" />
 
-      <div className="absolute left-[330px] top-[110px] z-10 flex flex-col gap-2">
+      <div className="absolute right-3 top-3 z-10 flex flex-col gap-2 xl:left-[330px] xl:right-auto xl:top-[110px]">
         <button className={btn} onClick={() => zoom(1)}><Plus size={18} /></button>
         <button className={btn} onClick={() => zoom(-1)}><Minus size={18} /></button>
       </div>
 
       {showCard && (
-        <div className="absolute bottom-[132px] left-[330px] z-10 w-[330px] rounded-2xl border border-white/10 bg-black/70 p-4 backdrop-blur-md">
+        <div className="absolute bottom-[136px] left-2 right-2 z-10 rounded-2xl border border-white/10 bg-black/70 p-3 backdrop-blur-md sm:right-auto sm:w-[330px] xl:bottom-[132px] xl:left-[330px] xl:p-4">
           <div className="text-sm font-semibold">{cfg.title}</div>
-          <div className="mt-1 text-xs text-gray-400">{cfg.note}</div>
+          <div className="mt-1 hidden text-xs text-gray-400 sm:block">{cfg.note}</div>
           {used && <div className="mt-2 text-xs text-gray-300">Source: {used}</div>}
                     {cfg.legend && (
             <div className="mt-3">
