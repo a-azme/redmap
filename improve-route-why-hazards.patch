@@ -1,0 +1,636 @@
+diff --git a/package.json b/package.json
+index 5db7a05..27289ef 100644
+--- a/package.json
++++ b/package.json
+@@ -8,7 +8,7 @@
+     "build": "vite build",
+     "lint": "eslint .",
+     "preview": "vite preview",
+-    "test": "node --test src/lib/realRoute.test.js src/lib/evaPlan.test.js src/services/marsElevation.test.js"
++    "test": "node --test src/lib/realRoute.test.js src/lib/evaPlan.test.js src/lib/why.test.js src/services/marsElevation.test.js"
+   },
+   "dependencies": {
+     "@tailwindcss/vite": "^4.3.3",
+diff --git a/src/components/route/EvaTimeline.jsx b/src/components/route/EvaTimeline.jsx
+index d48373f..479ca04 100644
+--- a/src/components/route/EvaTimeline.jsx
++++ b/src/components/route/EvaTimeline.jsx
+@@ -1,4 +1,5 @@
+ import { fmtClock } from '../../lib/marsTime';
++import SourceChip from './SourceChip';
+ import { evaPlanText, evaPlanJson, downloadText } from '../../lib/exportRoute';
+ 
+ const ICON = { critical: '⛔', caution: '⚠️', info: 'ℹ️' };
+@@ -37,9 +38,9 @@ export default function EvaTimeline({ route, plan, date, onDate, travel, onTrave
+       </div>
+ 
+       <dl className="rm-stats rm-eva__env">
+-        <div><dt>Season</dt><dd>Ls {plan.ls}°</dd><small className="rm-muted">{plan.season}</small></div>
+-        <div><dt>Daylight</dt><dd>{dayText}</dd><small className="rm-muted">local solar time</small></div>
+-        <div><dt>Radio delay</dt><dd>{plan.comms.oneWayMin} min</dd><small className="rm-muted">one way · {plan.comms.distanceAU} AU</small></div>
++        <div><dt>Season<SourceChip id="MARS24" /></dt><dd>Ls {plan.ls}°</dd><small className="rm-muted">{plan.season}</small></div>
++        <div><dt>Daylight<SourceChip id="MARS24" /></dt><dd>{dayText}</dd><small className="rm-muted">local solar time</small></div>
++        <div><dt>Radio delay<SourceChip id="EPHEM" /></dt><dd>{plan.comms.oneWayMin} min</dd><small className="rm-muted">one way · {plan.comms.distanceAU} AU</small></div>
+       </dl>
+ 
+       {plan.warnings.length > 0 && (
+diff --git a/src/components/route/RouteMap.jsx b/src/components/route/RouteMap.jsx
+index 1e63553..16814cc 100644
+--- a/src/components/route/RouteMap.jsx
++++ b/src/components/route/RouteMap.jsx
+@@ -6,6 +6,7 @@ import { TILE_LAYERS } from '../../services/layerService'
+ import { MARS, at, toLon, applyLayer } from '../../services/tiles'
+ import { LOCATIONS } from './routeUtils'
+ import { MODE_COLORS } from '../../lib/routeAnalysis.js'
++import { hazardRectangle, renderHazardCanvas } from '../../lib/hazardImage.js'
+ 
+ window.CESIUM_BASE_URL = '/cesium/'
+ 
+@@ -55,7 +56,7 @@ function fitView(viewer, route, duration = 1.8) {
+   }
+ }
+ 
+-export default function RouteMap({ route, alternatives = null, layer = 'terrain', mode = '3D', selectedStopIds = [] }) {
++export default function RouteMap({ route, alternatives = null, hazard = 'off', layer = 'terrain', mode = '3D', selectedStopIds = [] }) {
+   const elRef = useRef(null)
+   const viewerRef = useRef(null)
+   const routeRef = useRef(route)
+@@ -181,6 +182,20 @@ export default function RouteMap({ route, alternatives = null, layer = 'terrain'
+     })
+ 
+     if (route) {
++      // hazard heat-map (slope risk or low ground) under the route line
++      if (hazard !== 'off' && route.hazard) {
++        const r = hazardRectangle(route.hazard)
++        if (r) {
++          viewer.entities.add({
++            rectangle: {
++              coordinates: Cesium.Rectangle.fromDegrees(r.west, r.south, r.east, r.north),
++              height: 100,
++              material: new Cesium.ImageMaterialProperty({ image: renderHazardCanvas(route.hazard, hazard), transparent: true }),
++            },
++          })
++        }
++      }
++
+       // the other modes, drawn thinner in their own colour so the routes can be compared
+       Object.entries(alternatives || {}).forEach(([m, alt]) => {
+         if (!alt || alt.error || alt.mode === route.mode) return
+@@ -274,7 +289,7 @@ export default function RouteMap({ route, alternatives = null, layer = 'terrain'
+     }
+     viewer.scene.preRender.addEventListener(onPreRender)
+     return () => { if (!viewer.isDestroyed()) viewer.scene.preRender.removeEventListener(onPreRender) }
+-  }, [route, alternatives, selectedStopIds])
++  }, [route, alternatives, hazard, selectedStopIds])
+ 
+   /* ---- 4. 3D <-> 2D ---- */
+   useEffect(() => {
+diff --git a/src/components/route/RouteOverview.jsx b/src/components/route/RouteOverview.jsx
+index f25e363..a1c104d 100644
+--- a/src/components/route/RouteOverview.jsx
++++ b/src/components/route/RouteOverview.jsx
+@@ -1,5 +1,6 @@
+ import { totalSols } from './routeUtils';
+ import LocationThumb from '../map/LocationThumb'
++import SourceChip from './SourceChip'
+ 
+ export default function RouteOverview({ route, plan = null, selectedStopIds = [] }) {
+   if (!route) {
+@@ -11,13 +12,15 @@ export default function RouteOverview({ route, plan = null, selectedStopIds = []
+     );
+   }
+ 
++  // chip = where the number comes from; simulated terrain is a model, not a measurement
++  const real = route.dataSource?.real;
+   const stats = [
+-    ['Total Distance', `~ ${route.distanceKm.toLocaleString()} km`],
+-    ['Estimated Time', `~ ${plan ? plan.totalSols : totalSols(route, selectedStopIds)} sols`],
+-    ['Elevation Gain', `+${route.elevationGainKm} km`],
+-    ['Max Slope', `${route.maxSlopeDeg.toFixed(0)}°`],
+-    ['Coldest (est.)', `${route.minTempC}°C`],
+-    ['Radiation dose', `≈ ${plan ? plan.radiationMsv : route.radiationMsv} mSv`],
++    ['Total Distance', `~ ${route.distanceKm.toLocaleString()} km`, real ? 'MOLA' : 'MODEL'],
++    ['Estimated Time', `~ ${plan ? plan.totalSols : totalSols(route, selectedStopIds)} sols`, 'MODEL'],
++    ['Elevation Gain', `+${route.elevationGainKm} km`, real ? 'MOLA' : 'MODEL'],
++    ['Max Slope', `${route.maxSlopeDeg.toFixed(0)}°`, real ? 'MOLA' : 'MODEL'],
++    ['Coldest (est.)', `${route.minTempC}°C`, 'MODEL'],
++    ['Radiation dose', `≈ ${plan ? plan.radiationMsv : route.radiationMsv} mSv`, 'MSL RAD'],
+   ];
+   const src = route.dataSource;
+ 
+@@ -33,8 +36,8 @@ export default function RouteOverview({ route, plan = null, selectedStopIds = []
+         </div>
+         <p className="rm-muted">{route.start.name} → {route.end.name}</p>
+         <dl className="rm-stats">
+-          {stats.map(([k, v]) => (
+-            <div key={k}><dt>{k}</dt><dd>{v}</dd></div>
++          {stats.map(([k, v, src]) => (
++            <div key={k}><dt>{k}<SourceChip id={src} /></dt><dd>{v}</dd></div>
+           ))}
+         </dl>
+         {src && (
+diff --git a/src/components/route/RouteWaypoints.jsx b/src/components/route/RouteWaypoints.jsx
+index 997d3b1..fc6f9f2 100644
+--- a/src/components/route/RouteWaypoints.jsx
++++ b/src/components/route/RouteWaypoints.jsx
+@@ -1,3 +1,5 @@
++import SourceChip from './SourceChip';
++
+ /** Numbered navigation waypoints for the planned route: the list a crew would read out. */
+ export default function RouteWaypoints({ route }) {
+   if (!route?.waypoints?.length) return null;
+@@ -5,7 +7,7 @@ export default function RouteWaypoints({ route }) {
+ 
+   return (
+     <section className="rm-card rm-waypoints">
+-      <h3>Waypoints <span className="rm-count">{route.waypoints.length}</span></h3>
++      <h3>Waypoints <span className="rm-count">{route.waypoints.length}</span> {route.dataSource?.real && <SourceChip id="MOLA" />}</h3>
+       <ol>
+         <li><span className="rm-wp__n rm-wp__n--start">S</span><div><strong>{route.start.name}</strong><small>Start · {ns(route.start.lat)}, {route.start.lon.toFixed(2)}°E</small></div></li>
+         {route.waypoints.map((w) => (
+diff --git a/src/components/route/RouteWhy.jsx b/src/components/route/RouteWhy.jsx
+new file mode 100644
+index 0000000..5c1c86a
+--- /dev/null
++++ b/src/components/route/RouteWhy.jsx
+@@ -0,0 +1,73 @@
++import SourceChip from './SourceChip';
++import { HAZARD_LEGENDS } from '../../lib/hazardImage';
++
++const HAZARDS = [['off', 'Off'], ['slope', 'Slope risk'], ['low', 'Low ground']];
++
++/** Explains the route: what a straight line would have met, why each bend exists, how the mode weighs terrain. */
++export default function RouteWhy({ route, hazard, onHazard }) {
++  const why = route?.why;
++  if (!why) return null;
++  const { direct, actual, reasons, cost } = why;
++  const rows = [
++    ['Steepest slope', `${direct.maxSlopeDeg}°`, `${actual.maxSlopeDeg}°`],
++    ['Lowest dip', `${direct.maxDepthKm} km`, `${actual.maxDepthKm} km`],
++    ['Climbing', `${direct.climbKm} km`, `${actual.climbKm} km`],
++    ['Distance', `${direct.km.toFixed(0)} km`, `${route.distanceKm} km`],
++  ];
++  const legend = HAZARD_LEGENDS[hazard];
++
++  return (
++    <section className="rm-card rm-why">
++      <h3>Why this route <SourceChip id="MOLA" /></h3>
++
++      <table className="rm-why__table">
++        <thead><tr><th /><th>Straight line</th><th>This route</th></tr></thead>
++        <tbody>
++          {rows.map(([k, a, b]) => (
++            <tr key={k}><td>{k}</td><td>{a}</td><td><strong>{b}</strong></td></tr>
++          ))}
++        </tbody>
++      </table>
++      <p className="rm-muted">
++        {why.extraKm > 0.5
++          ? `The detour adds ${why.extraKm} km (${((why.extraKm / Math.max(1, direct.km)) * 100).toFixed(1)}%) to avoid the hazards the straight line meets.`
++          : 'The terrain here is easy enough that a near-straight path is also the safest.'}
++      </p>
++
++      {reasons.length > 0 && (
++        <ol className="rm-why__list">
++          {reasons.map((r) => (
++            <li key={r.n}>
++              <span className="rm-wp__n">{r.n}</span>
++              <div>
++                {r.text} <SourceChip id={r.source} />
++                {r.extraKm > 0 && r.type !== 'science' && <small> +{r.extraKm} km</small>}
++              </div>
++            </li>
++          ))}
++        </ol>
++      )}
++
++      <p className="rm-muted">
++        <strong>{route.settings.mode}</strong> mode: hard limit {cost.maxSlope}° · slope penalty ×{cost.slopeWeight} · rugged ground ×{cost.roughWeight ?? 0} · low spots {cost.lowGroundOn ? `×${cost.lowWeight}` : 'ignored'} · each 1 km of climbing costs {cost.climbKmPerKm} km.
++      </p>
++
++      {route.hazard && (
++        <div className="rm-why__layers">
++          <span className="rm-muted">Show on map</span>
++          <div className="rm-modes">
++            {HAZARDS.map(([k, label]) => (
++              <button key={k} type="button" className={`rm-chip ${hazard === k ? 'is-active' : ''}`} onClick={() => onHazard(k)}>{label}</button>
++            ))}
++          </div>
++          {legend && (
++            <div className="rm-legend">
++              <div className="rm-legend__bar" style={{ background: legend.gradient }} />
++              <div className="rm-legend__labels">{legend.stops.map((s) => <span key={s}>{s}</span>)}</div>
++            </div>
++          )}
++        </div>
++      )}
++    </section>
++  );
++}
+diff --git a/src/components/route/ScienceStops.jsx b/src/components/route/ScienceStops.jsx
+index bc6b5df..efaf17f 100644
+--- a/src/components/route/ScienceStops.jsx
++++ b/src/components/route/ScienceStops.jsx
+@@ -1,3 +1,6 @@
++import SourceChip from './SourceChip';
++import { sourceKey } from '../../lib/realRoute.js';
++
+ export default function ScienceStops({ route, selectedIds = [], onToggle }) {
+   if (!route) return null;
+ 
+@@ -25,7 +28,7 @@ export default function ScienceStops({ route, selectedIds = [], onToggle }) {
+                   <strong>{s.title}</strong>
+                   <small>km {s.km} · {s.elevKm.toFixed(1)} km elev · {s.lat.toFixed(2)}°, {s.lon.toFixed(1)}°E{s.offRouteKm != null && ` · ${s.offRouteKm} km off route`}</small>
+                   <p>{s.detail}</p>
+-                  <span className="rm-src">Data: {s.source}</span>
++                  <span className="rm-src"><SourceChip id={route.dataSource?.real === false ? 'MODEL' : sourceKey(s.source)} /> {s.source}</span>
+                 </div>
+               </label>
+             </li>
+diff --git a/src/components/route/SourceChip.jsx b/src/components/route/SourceChip.jsx
+new file mode 100644
+index 0000000..7b37d33
+--- /dev/null
++++ b/src/components/route/SourceChip.jsx
+@@ -0,0 +1,24 @@
++// Small pill showing where a number comes from. "data" = measured by a NASA mission,
++// "model" = calculated by RedMap from a published model or an assumption.
++export const SOURCES = {
++  MOLA: { kind: 'data', title: 'Mars Global Surveyor – Mars Orbiter Laser Altimeter (MOLA): global elevation. Slope, low ground and climbing are calculated from it.' },
++  'MSL RAD': { kind: 'data', title: 'Curiosity (Mars Science Laboratory) Radiation Assessment Detector: about 0.64 mSv per sol at the surface.' },
++  CRISM: { kind: 'data', title: 'Mars Reconnaissance Orbiter – Compact Reconnaissance Imaging Spectrometer: clay, carbonate and other minerals.' },
++  HiRISE: { kind: 'data', title: 'Mars Reconnaissance Orbiter – High Resolution Imaging Science Experiment camera.' },
++  CTX: { kind: 'data', title: 'Mars Reconnaissance Orbiter – Context Camera.' },
++  ROVER: { kind: 'data', title: 'Measured by a rover on the surface (Perseverance or Curiosity).' },
++  NASA: { kind: 'data', title: 'NASA orbital or surface data.' },
++  MARS24: { kind: 'model', title: 'Calculated by RedMap with the Mars24 solar-position algorithm (Allison & McEwen 2000).' },
++  EPHEM: { kind: 'model', title: 'Calculated by RedMap from JPL approximate planetary orbital elements (accurate to a few thousandths of an AU).' },
++  MODEL: { kind: 'model', title: 'RedMap estimate, not a measurement: it depends on the assumptions listed in the app.' },
++};
++
++export default function SourceChip({ id }) {
++  const s = SOURCES[id];
++  if (!s) return null;
++  return (
++    <abbr className={`rm-src-chip rm-src-chip--${s.kind}`} title={s.title}>
++      {id === 'EPHEM' ? 'JPL' : id}
++    </abbr>
++  );
++}
+diff --git a/src/components/route/route.css b/src/components/route/route.css
+index 8832a63..e882d3c 100644
+--- a/src/components/route/route.css
++++ b/src/components/route/route.css
+@@ -269,3 +269,21 @@
+ .rm-wp__n { flex: 0 0 22px; height: 22px; border-radius: 50%; background: #f5c518; color: #1a1a1a; font-weight: 700; font-size: 11.5px; display: grid; place-items: center; }
+ .rm-wp__n--start { background: #2ecc71; }
+ .rm-wp__n--end { background: var(--red); color: #fff; }
++
++/* ---- source chips ---- */
++.rm-src-chip { display: inline-block; font-size: 9.5px; font-weight: 700; letter-spacing: .04em; padding: 1px 6px; border-radius: 99px; vertical-align: middle; cursor: help; text-decoration: none; white-space: nowrap; }
++.rm-src-chip--data { background: rgba(43, 181, 245, .16); color: #7fd4ff; border: 1px solid rgba(43, 181, 245, .4); }
++.rm-src-chip--model { background: transparent; color: var(--amber); border: 1px dashed rgba(245, 165, 36, .6); }
++.rm-stats dt .rm-src-chip, .rm-eva__env dt .rm-src-chip { margin-left: 5px; }
++
++/* ---- why this route ---- */
++.rm-why__table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
++.rm-why__table th, .rm-why__table td { padding: 4px 3px; text-align: right; border-top: 1px solid var(--line); }
++.rm-why__table thead th { border-top: 0; color: var(--muted); font-weight: 600; font-size: 11.5px; }
++.rm-why__table td:first-child { text-align: left; color: var(--muted); }
++.rm-why__list { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
++.rm-why__list li { display: flex; gap: 10px; align-items: flex-start; font-size: 12.5px; }
++.rm-why__list small { color: var(--muted); }
++.rm-why__layers { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
++.rm-legend__bar { height: 8px; border-radius: 4px; }
++.rm-legend__labels { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+diff --git a/src/lib/hazardImage.js b/src/lib/hazardImage.js
+new file mode 100644
+index 0000000..655f18e
+--- /dev/null
++++ b/src/lib/hazardImage.js
+@@ -0,0 +1,56 @@
++// Turns the planner's hazard grids into a translucent heat-map image for the map.
++
++const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
++const lerp = (a, b, t) => a + (b - a) * t
++const mix = (c0, c1, t) => c0.map((v, i) => lerp(v, c1[i], t))
++
++// [value, r, g, b, alpha]; values are in degrees (slope) or km (low ground)
++const RAMPS = {
++  slope: [[4, 255, 214, 10, 0], [6, 255, 214, 10, 0.35], [10, 255, 140, 20, 0.5], [14, 235, 50, 40, 0.62], [20, 160, 10, 60, 0.75]],
++  low: [[0.15, 150, 170, 255, 0], [0.3, 150, 170, 255, 0.3], [0.7, 180, 90, 230, 0.5], [1.2, 230, 40, 170, 0.68]],
++}
++
++/** rgba (0-255, alpha 0-1) for a hazard value. kind: 'slope' (deg) | 'low' (km) */
++export function hazardColor(kind, value) {
++  const ramp = RAMPS[kind]
++  if (value <= ramp[0][0]) return [ramp[0][1], ramp[0][2], ramp[0][3], 0]
++  for (let i = 1; i < ramp.length; i++) {
++    if (value <= ramp[i][0]) {
++      const t = (value - ramp[i - 1][0]) / (ramp[i][0] - ramp[i - 1][0])
++      const c = mix(ramp[i - 1].slice(1), ramp[i].slice(1), t)
++      return [Math.round(c[0]), Math.round(c[1]), Math.round(c[2]), c[3]]
++    }
++  }
++  const last = ramp[ramp.length - 1]
++  return [last[1], last[2], last[3], last[4]]
++}
++
++export const HAZARD_LEGENDS = {
++  slope: { title: 'Slope risk', stops: ['< 6°', '10°', '14°', '20°+'], gradient: 'linear-gradient(to right, rgba(255,214,10,.35), rgb(255,140,20), rgb(235,50,40), rgb(160,10,60))' },
++  low: { title: 'Low ground', stops: ['0.3 km', '0.7 km', '1.2 km+'], gradient: 'linear-gradient(to right, rgba(150,170,255,.35), rgb(180,90,230), rgb(230,40,170))' },
++}
++
++/** Degrees west/south/east/north for the grid, or null if it crosses the +-180 line (drawn only when it does not). */
++export function hazardRectangle(h) {
++  const wrap = (l) => ((((l + 180) % 360) + 360) % 360) - 180
++  const west = wrap(h.bounds.lonMin)
++  const east = west + (h.bounds.lonMax - h.bounds.lonMin)
++  if (east > 180) return null
++  return { west, east, south: h.bounds.latMin, north: h.bounds.latMax }
++}
++
++/** Browser only: a gw x gh canvas, north at the top, ready to use as an image. */
++export function renderHazardCanvas(h, kind) {
++  const c = document.createElement('canvas')
++  c.width = h.gw; c.height = h.gh
++  const ctx = c.getContext('2d')
++  const img = ctx.createImageData(h.gw, h.gh)
++  const src = kind === 'slope' ? h.slope : h.low
++  for (let i = 0; i < src.length; i++) {
++    const [r, g, b, a] = hazardColor(kind, kind === 'slope' ? src[i] / 4 : src[i] / 100)
++    img.data[i * 4] = r; img.data[i * 4 + 1] = g; img.data[i * 4 + 2] = b
++    img.data[i * 4 + 3] = Math.round(clamp(a, 0, 1) * 255)
++  }
++  ctx.putImageData(img, 0, 0)
++  return c
++}
+diff --git a/src/lib/realRoute.js b/src/lib/realRoute.js
+index efcf206..473a5c5 100644
+--- a/src/lib/realRoute.js
++++ b/src/lib/realRoute.js
+@@ -291,10 +291,10 @@ export function buildWaypoints(ll, cum, total, distanceKm, stops, { maxTurns = 6
+   const turns = []
+   for (let i = 1; i < ll.length - 1; i++) {
+     const t = Math.abs(wrapLon(bearing(ll[i], ll[i + 1]) - bearing(ll[i - 1], ll[i])))
+-    if (t >= minTurnDeg) turns.push({ kind: 'turn', turnDeg: t, km: km(cum[i]), lat: ll[i].lat, lon: ll[i].lon })
++    if (t >= minTurnDeg) turns.push({ kind: 'turn', turnDeg: t, idx: i, km: km(cum[i]), lat: ll[i].lat, lon: ll[i].lon })
+   }
+   const gap = Math.max(5, distanceKm * 0.06) // keep waypoints from piling up
+-  const picked = stops.map((s) => ({ kind: 'stop', id: s.id, name: s.title, km: s.km, lat: s.lat, lon: s.lon, elevKm: s.elevKm }))
++  const picked = stops.map((s) => ({ kind: 'stop', id: s.id, name: s.title, note: s.detail, source: s.source, km: s.km, lat: s.lat, lon: s.lon, elevKm: s.elevKm }))
+   for (const t of turns.sort((a, b) => b.turnDeg - a.turnDeg)) {
+     if (picked.filter((w) => w.kind === 'turn').length >= maxTurns) break
+     if (t.km < gap || t.km > distanceKm - gap) continue
+@@ -312,6 +312,85 @@ export function buildWaypoints(ll, cum, total, distanceKm, stops, { maxTurns = 6
+     }))
+ }
+ 
++/** Slope, low ground and climbing met along a straight run of cells. Used to compare "what a bend avoids". */
++function measureLine(grid, depth, pts) {
++  let maxSlope = 0, maxDepth = 0, climb = 0, minElev = Infinity, km = 0
++  let prev = null
++  for (let i = 0; i < pts.length - 1; i++) {
++    const { fx: x0, fy: y0 } = pts[i], { fx: x1, fy: y1 } = pts[i + 1]
++    const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) * 2))
++    const ym = Math.round((y0 + y1) / 2)
++    const step = Math.hypot((x1 - x0) * grid.dxRow[ym], (y1 - y0) * grid.dy) / n
++    for (let k = 0; k <= n; k++) {
++      const x = x0 + ((x1 - x0) * k) / n, y = y0 + ((y1 - y0) * k) / n
++      const h = bilinear(grid, x, y)
++      minElev = Math.min(minElev, h)
++      maxDepth = Math.max(maxDepth, bilinear(grid, x, y, depth))
++      if (prev !== null && step > 0) {
++        maxSlope = Math.max(maxSlope, Math.atan(Math.abs(h - prev) / step) / RAD)
++        climb += Math.max(0, h - prev)
++        km += step
++      }
++      prev = h
++    }
++  }
++  return { maxSlopeDeg: +maxSlope.toFixed(1), maxDepthKm: +maxDepth.toFixed(2), climbKm: +climb.toFixed(2), minElevKm: +minElev.toFixed(2), km: +km.toFixed(1) }
++}
++
++/** Map a catalogue source string ("MRO CRISM", "Curiosity REMS"...) to a short chip key. */
++export function sourceKey(src = '') {
++  if (/CRISM/i.test(src)) return 'CRISM'
++  if (/HiRISE/i.test(src)) return 'HiRISE'
++  if (/CTX/i.test(src)) return 'CTX'
++  if (/SuperCam|Mastcam|REMS|CheMin|SAM|Perseverance|Curiosity/i.test(src)) return 'ROVER'
++  return 'NASA'
++}
++
++/**
++ * Plain-language reasons for each waypoint, from what the planner measured:
++ * for a bend, compare the straight chord across it with the path actually taken.
++ */
++export function explainRoute(grid, depth, nodes, cum, total, waypoints, direct, actual) {
++  const reasons = []
++  for (const w of waypoints) {
++    if (w.kind === 'stop') {
++      reasons.push({ n: w.n, type: 'science', source: sourceKey(w.source), text: `Passes ${w.name}${w.note ? ` – ${w.note}` : ''}` })
++      continue
++    }
++    const here = cum[w.idx]
++    let j0 = w.idx, j1 = w.idx
++    while (j0 > 0 && cum[j0] > here - 0.15 * total) j0--
++    while (j1 < nodes.length - 1 && cum[j1] < here + 0.15 * total) j1++
++    const chord = measureLine(grid, depth, [nodes[j0], nodes[j1]])
++    const real = measureLine(grid, depth, nodes.slice(j0, j1 + 1))
++    // name the most specific cause first: a low spot, then steep ground, then plain climbing
++    const dDepth = chord.maxDepthKm - real.maxDepthKm
++    const dSlope = chord.maxSlopeDeg - real.maxSlopeDeg
++    const dClimb = chord.climbKm - real.climbKm
++    const extraKm = +(real.km - chord.km).toFixed(1)
++    if (dDepth >= 0.3) {
++      reasons.push({ n: w.n, type: 'low-ground', source: 'MOLA', value: chord.maxDepthKm, extraKm, text: `Avoids a low spot ${chord.maxDepthKm.toFixed(1)} km below its surroundings (crater floor or pit)` })
++    } else if (dSlope >= 4) {
++      reasons.push({ n: w.n, type: 'steep', source: 'MOLA', value: chord.maxSlopeDeg, extraKm, text: `Avoids slopes up to ${chord.maxSlopeDeg.toFixed(0)}°` })
++    } else if (dClimb >= 0.3) {
++      reasons.push({ n: w.n, type: 'climb', source: 'MOLA', value: chord.climbKm, extraKm, text: `Avoids a ${chord.climbKm.toFixed(1)} km climb` })
++    } else {
++      reasons.push({ n: w.n, type: 'effort', source: 'MOLA', extraKm, text: 'Follows easier ground around local terrain' })
++    }
++  }
++  return { reasons, direct, actual }
++}
++
++/** Compact byte grids for the map heat-maps: slope in quarter-degrees, low ground in 10 m. */
++function packHazard(grid, rough, depth) {
++  const slope = new Uint8Array(rough.length), low = new Uint8Array(rough.length)
++  for (let i = 0; i < rough.length; i++) {
++    slope[i] = Math.min(255, Math.round(rough[i] * 4))
++    low[i] = Math.min(255, Math.round(depth[i] * 100))
++  }
++  return { bounds: grid.bounds, lonMid: grid.lonMid, gw: grid.gw, gh: grid.gh, slope, low }
++}
++
+ export async function planRealRoute(start, end, settings, { prepareTerrain, pois = [] }) {
+   if (!start || !end || start.id === end.id) return null
+ 
+@@ -332,8 +411,8 @@ export async function planRealRoute(start, end, settings, { prepareTerrain, pois
+ 
+   // Per-cell cost multiplier: rugged ground costs more (>1), cells near science sites cost less (<1)
+   const cellMult = new Float32Array(grid.gw * grid.gh).fill(1)
++  const rough = ruggedness(grid)
+   if (cfg.roughWeight) {
+-    const rough = ruggedness(grid)
+     for (let i = 0; i < cellMult.length; i++) cellMult[i] *= 1 + cfg.roughWeight * (rough[i] / 10) ** 2
+   }
+   // Low ground (crater floors, pits): costly to enter and leave, collects dust and cold air, poor radio line of sight.
+@@ -433,8 +512,14 @@ export async function planRealRoute(start, end, settings, { prepareTerrain, pois
+     w.elevKm = +bilinear(grid, c.x, c.y).toFixed(2)
+   }
+ 
++  const why = {
++    ...explainRoute(grid, depth, nodes, cum, total, navPoints, measureLine(grid, depth, [nodes[0], nodes[nodes.length - 1]]), measureLine(grid, depth, nodes)),
++    extraKm: +(total - haversineKm(start, end)).toFixed(1),
++    cost: { ...cfg, maxSlope: Math.min(settings.maxSlopeDeg, cfg.maxSlope ?? 90), lowGroundOn: lowW > 0 },
++  }
++
+   return finalizeRoute({
+-    start, end, settings, points, distanceKm, stops: keptStops, waypoints: navPoints,
++    start, end, settings, points, distanceKm, stops: keptStops, waypoints: navPoints, why, hazard: packHazard(grid, rough, depth),
+     dataSource: { ...terrain.source, resolutionKm: +spec.cellKm.toFixed(2) },
+   })
+ }
+diff --git a/src/lib/routeAnalysis.js b/src/lib/routeAnalysis.js
+index 07b7f41..ec022cc 100644
+--- a/src/lib/routeAnalysis.js
++++ b/src/lib/routeAnalysis.js
+@@ -35,7 +35,7 @@ export const estimateTempC = (latDeg, elevKm) =>
+  * stops:  [{ id, title, source, detail, km, lat, lon, elevKm }]
+  * dataSource: { real: boolean, name?, resolutionKm?, note? }
+  */
+-export function finalizeRoute({ start, end, settings, points, distanceKm, stops = [], waypoints = [], dataSource }) {
++export function finalizeRoute({ start, end, settings, points, distanceKm, stops = [], waypoints = [], why = null, hazard = null, dataSource }) {
+   const mode = MODES[settings.mode] ?? MODES.fastest
+ 
+   let gain = 0, loss = 0
+@@ -111,7 +111,7 @@ export function finalizeRoute({ start, end, settings, points, distanceKm, stops
+     elevationGainKm: +gain.toFixed(2), elevationLossKm: +loss.toFixed(2),
+     avgSlopeDeg, maxSlopeDeg, minTempC, radiationMsv, risk,
+     riskLabel: risk < 25 ? 'Low' : risk < 55 ? 'Moderate' : 'High',
+-    points, path: points.map((p) => ({ lat: p.lat, lon: p.lon })), warnings, stops, waypoints,
++    points, path: points.map((p) => ({ lat: p.lat, lon: p.lon })), warnings, stops, waypoints, why, hazard,
+     dataSource: dataSource ?? { real: false },
+   }
+ }
+diff --git a/src/lib/why.test.js b/src/lib/why.test.js
+new file mode 100644
+index 0000000..193bd44
+--- /dev/null
++++ b/src/lib/why.test.js
+@@ -0,0 +1,75 @@
++import test from 'node:test'
++import assert from 'node:assert/strict'
++import { planRealRoute, sourceKey } from './realRoute.js'
++import { hazardColor, hazardRectangle } from './hazardImage.js'
++import { haversineKm } from './routeAnalysis.js'
++
++const NILI = { id: 'nili', name: 'Nili Fossae', lat: 21.0, lon: 74.5 }
++const JEZERO = { id: 'jezero', name: 'Jezero Crater', lat: 18.435, lon: 77.527 }
++const mid = { lat: (NILI.lat + JEZERO.lat) / 2, lon: (NILI.lon + JEZERO.lon) / 2 }
++const settings = (o = {}) => ({ mode: 'fastest', maxSlopeDeg: 25, avoidRough: true, showScience: true, evaHoursPerSol: 6, ...o })
++const terrainOf = (heightAt) => ({ prepareTerrain: async () => ({ heightAt, source: { real: true, name: 'test' } }) })
++
++const crater = (lat, lon) => -2 - 1.5 * Math.exp(-(haversineKm({ lat, lon }, mid) ** 2) / (2 * 14 * 14))
++
++test('a bend around a crater is explained as avoiding a low spot, with the real depth', async () => {
++  const r = await planRealRoute(NILI, JEZERO, settings({ showScience: false }), terrainOf(crater))
++  const turn = r.why.reasons.find((x) => x.type === 'low-ground')
++  assert.ok(turn, JSON.stringify(r.why.reasons))
++  assert.equal(turn.source, 'MOLA')
++  assert.ok(turn.value > 0.5 && turn.value < 1.6, `depth ${turn.value}`)
++  assert.match(turn.text, /low spot/)
++  assert.ok(turn.n >= 1 && r.waypoints.some((w) => w.n === turn.n))
++})
++
++test('the direct line is shown to be worse than the chosen route', async () => {
++  const r = await planRealRoute(NILI, JEZERO, settings({ showScience: false }), terrainOf(crater))
++  assert.ok(r.why.direct.maxDepthKm > r.why.actual.maxDepthKm + 0.4)
++  assert.ok(r.why.direct.minElevKm < r.why.actual.minElevKm)
++  assert.ok(r.why.extraKm >= 0 && r.why.extraKm < 20)
++  assert.equal(typeof r.why.cost.climbKmPerKm, 'number')
++})
++
++test('science stops are explained with their catalogue source', async () => {
++  const pois = [{ id: 'clay', name: 'Clay Outcrop', lat: 19.7, lon: 76.05, note: 'Clay minerals', source: 'MRO CRISM' }]
++  const r = await planRealRoute(NILI, JEZERO, settings({ mode: 'scientific' }), { ...terrainOf(() => -2), pois })
++  const sci = r.why.reasons.find((x) => x.type === 'science')
++  assert.equal(sci.source, 'CRISM')
++  assert.match(sci.text, /Clay Outcrop/)
++})
++
++test('flat ground has nothing to explain', async () => {
++  const r = await planRealRoute(NILI, JEZERO, settings({ showScience: false }), terrainOf(() => -2))
++  assert.equal(r.why.reasons.length, 0)
++  assert.equal(r.why.extraKm < 3, true)
++})
++
++test('hazard grids are packed for the map and cover the route area', async () => {
++  const r = await planRealRoute(NILI, JEZERO, settings(), terrainOf(crater))
++  const h = r.hazard
++  assert.equal(h.slope.length, h.gw * h.gh)
++  assert.equal(h.low.length, h.gw * h.gh)
++  assert.ok(Math.max(...h.low) >= 85, 'the crater should show up as ~0.9 km of low ground')
++  assert.ok(Math.max(...h.slope) > 0)
++})
++
++test('heat-map colours: transparent when safe, opaque and redder as it gets worse', () => {
++  assert.equal(hazardColor('slope', 2)[3], 0)
++  const a = hazardColor('slope', 8), b = hazardColor('slope', 18)
++  assert.ok(b[3] > a[3] && b[1] < a[1])
++  assert.equal(hazardColor('low', 0.05)[3], 0)
++  assert.ok(hazardColor('low', 1.5)[3] > hazardColor('low', 0.4)[3])
++})
++
++test('heat-map rectangle handles longitudes above 180 and refuses to straddle the +-180 line', () => {
++  const ok = hazardRectangle({ bounds: { lonMin: 306, lonMax: 312, latMin: -20, latMax: -10 } })
++  assert.deepEqual([ok.west, ok.east], [-54, -48])
++  assert.equal(hazardRectangle({ bounds: { lonMin: 176, lonMax: 184, latMin: 0, latMax: 5 } }), null)
++})
++
++test('chip keys map catalogue sources honestly', () => {
++  assert.equal(sourceKey('MRO CRISM'), 'CRISM')
++  assert.equal(sourceKey('MRO HiRISE / Perseverance Mastcam-Z'), 'HiRISE')
++  assert.equal(sourceKey('Curiosity REMS'), 'ROVER')
++  assert.equal(sourceKey(''), 'NASA')
++})
+diff --git a/src/pages/RoutePlannerPage.jsx b/src/pages/RoutePlannerPage.jsx
+index db7b31e..b9dd95f 100644
+--- a/src/pages/RoutePlannerPage.jsx
++++ b/src/pages/RoutePlannerPage.jsx
+@@ -10,6 +10,7 @@ import DestinationInfo from '../components/route/DestinationInfo'
+ import EvaTimeline from '../components/route/EvaTimeline'
+ import RouteCompare from '../components/route/RouteCompare'
+ import RouteWaypoints from '../components/route/RouteWaypoints'
++import RouteWhy from '../components/route/RouteWhy'
+ import { planEva } from '../lib/evaPlan'
+ 
+ // must match keys in services/layerService TILE_LAYERS
+@@ -22,6 +23,7 @@ export default function RoutePlannerPage() {
+   const [route, setRoute] = useState(null)
+   const [selected, setSelected] = useState([])
+   const [alternatives, setAlternatives] = useState(null)
++  const [hazard, setHazard] = useState('off') // map heat-map: 'off' | 'slope' | 'low'
+   const [layer, setLayer] = useState('terrain')
+   const [mode, setMode] = useState('3D')
+   const [evaDate, setEvaDate] = useState(() => new Date().toISOString().slice(0, 10))
+@@ -39,7 +41,7 @@ export default function RoutePlannerPage() {
+     return (
+     <div className="rm-page">
+       <div className="rm-mapwrap">
+-        <RouteMap route={route} alternatives={alternatives} layer={layer} mode={mode} selectedStopIds={selected} />
++        <RouteMap route={route} alternatives={alternatives} hazard={hazard} layer={layer} mode={mode} selectedStopIds={selected} />
+       </div>
+ 
+       <div className="rm-layout">
+@@ -60,6 +62,7 @@ export default function RoutePlannerPage() {
+ 
+         <div className="rm-right">
+           <RouteCompare routes={alternatives} current={route} onSelect={(r) => { setRoute(r); setSelected([]) }} />
++          <RouteWhy route={route} hazard={hazard} onHazard={setHazard} />
+           <DestinationInfo route={route} onDetails={() => navigate('/missions')} />
+           <EvaTimeline route={route} plan={plan} date={evaDate} onDate={setEvaDate} travel={travel} onTravel={setTravel} />
+           <RouteWaypoints route={route} />

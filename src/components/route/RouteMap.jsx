@@ -5,10 +5,14 @@ import { Plus, Minus, Crosshair, RotateCcw } from 'lucide-react'
 import { TILE_LAYERS } from '../../services/layerService'
 import { MARS, at, toLon, applyLayer } from '../../services/tiles'
 import { LOCATIONS } from './routeUtils'
+import { MODE_COLORS } from '../../lib/routeAnalysis.js'
+import { hazardRectangle, renderHazardCanvas } from '../../lib/hazardImage.js'
 
 window.CESIUM_BASE_URL = '/cesium/'
 
 const BLUE = Cesium.Color.fromCssColorString('#2bb5f5')
+const ROUTE_LINE = Cesium.Color.fromCssColorString('#9fe0ff')
+const ROUTE_GLOW = Cesium.Color.fromCssColorString('#2bb5f5').withAlpha(0.5)
 const HOME = () => at(77, 18, 1.4e7)
 
 // Rectangle around the route with extra room so the side panels don't cover it (used in 2D)
@@ -52,7 +56,7 @@ function fitView(viewer, route, duration = 1.8) {
   }
 }
 
-export default function RouteMap({ route, layer = 'terrain', mode = '3D', selectedStopIds = [] }) {
+export default function RouteMap({ route, alternatives = null, hazard = 'off', layer = 'terrain', mode = '3D', selectedStopIds = [] }) {
   const elRef = useRef(null)
   const viewerRef = useRef(null)
   const routeRef = useRef(route)
@@ -178,22 +182,50 @@ export default function RouteMap({ route, layer = 'terrain', mode = '3D', select
     })
 
     if (route) {
+      // hazard heat-map (slope risk or low ground) under the route line
+      if (hazard !== 'off' && route.hazard) {
+        const r = hazardRectangle(route.hazard)
+        if (r) {
+          viewer.entities.add({
+            rectangle: {
+              coordinates: Cesium.Rectangle.fromDegrees(r.west, r.south, r.east, r.north),
+              height: 100,
+              material: new Cesium.ImageMaterialProperty({ image: renderHazardCanvas(route.hazard, hazard), transparent: true }),
+            },
+          })
+        }
+      }
+
+      // the other modes, drawn thinner in their own colour so the routes can be compared
+      Object.entries(alternatives || {}).forEach(([m, alt]) => {
+        if (!alt || alt.error || alt.mode === route.mode) return
+        viewer.entities.add({
+          polyline: {
+            positions: alt.path.map((p) => at(p.lon, p.lat, 250)),
+            width: 4,
+            arcType: Cesium.ArcType.GEODESIC,
+            material: Cesium.Color.fromCssColorString(MODE_COLORS[m] || '#ffffff').withAlpha(0.85),
+          },
+        })
+      })
+
       const pos = route.path.map((p) => at(p.lon, p.lat, 300))
 
+      // glow + solid light-blue line that follows the planned path
       viewer.entities.add({
         polyline: {
           positions: pos,
-          width: 12,
+          width: 10,
           arcType: Cesium.ArcType.GEODESIC,
-          material: new Cesium.PolylineGlowMaterialProperty({ glowPower: 0.22, color: BLUE }),
+          material: new Cesium.PolylineGlowMaterialProperty({ glowPower: 0.18, color: ROUTE_GLOW }),
         },
       })
       viewer.entities.add({
         polyline: {
           positions: pos,
-          width: 3,
+          width: 3.5,
           arcType: Cesium.ArcType.GEODESIC,
-          material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.WHITE, dashLength: 16 }),
+          material: ROUTE_LINE,
         },
       })
 
@@ -205,13 +237,28 @@ export default function RouteMap({ route, layer = 'terrain', mode = '3D', select
             color: w.severity === 'critical' ? '#ff4d4d' : '#f5a524',
           }))
 
-      route.stops.forEach((s) => {
-        const on = selectedStopIds.includes(s.id)
-        addPoint({
-          id: 's-' + s.id, name: s.title, lon: s.lon, lat: s.lat,
-          color: on ? '#4be08a' : '#f5c518', size: on ? 13 : 10, always: on,
+      if (route.waypoints?.length) {
+        // numbered navigation waypoints: "1. Jezero Crater", "Waypoint 2 (15.4°N, 83.6°E)"
+        route.waypoints.forEach((w) => {
+          const on = w.kind === 'stop' && selectedStopIds.includes(w.id)
+          const label = w.kind === 'stop'
+            ? `${w.n}. ${w.name}`
+            : `Waypoint ${w.n} (${Math.abs(w.lat).toFixed(1)}°${w.lat >= 0 ? 'N' : 'S'}, ${w.lon.toFixed(1)}°E)`
+          if (w.kind === 'checkpoint') {
+            addPoint({ id: 'wp-' + w.n, name: `Checkpoint ${w.n} · km ${w.km}`, lon: w.lon, lat: w.lat, color: '#4fc3f7', size: 7, always: false })
+            return
+          }
+          addPoint({ id: 'wp-' + w.n, name: label, lon: w.lon, lat: w.lat, color: on ? '#4be08a' : '#f5c518', size: 11, always: true })
         })
-      })
+      } else {
+        route.stops.forEach((s) => {
+          const on = selectedStopIds.includes(s.id)
+          addPoint({
+            id: 's-' + s.id, name: s.title, lon: s.lon, lat: s.lat,
+            color: on ? '#4be08a' : '#f5c518', size: on ? 13 : 10, always: on,
+          })
+        })
+      }
 
       addPoint({ id: 'start', name: `Start: ${route.start.name}`, lon: route.start.lon, lat: route.start.lat, color: '#2ecc71', size: 14, always: true })
       addPoint({ id: 'end', name: `Destination: ${route.end.name}`, lon: route.end.lon, lat: route.end.lat, color: '#e5322d', size: 14, always: true, dy: 16 })
@@ -246,7 +293,7 @@ export default function RouteMap({ route, layer = 'terrain', mode = '3D', select
     }
     viewer.scene.preRender.addEventListener(onPreRender)
     return () => { if (!viewer.isDestroyed()) viewer.scene.preRender.removeEventListener(onPreRender) }
-  }, [route, selectedStopIds])
+  }, [route, alternatives, hazard, selectedStopIds])
 
   /* ---- 4. 3D <-> 2D ---- */
   useEffect(() => {

@@ -1,6 +1,6 @@
 import locationData from '../../data/locations.json'
+import { MODES, MARS_RADIUS_KM, haversineKm, finalizeRoute, estimateTempC } from '../../lib/routeAnalysis.js'
 
-export const MARS_RADIUS_KM = 3389.5;
 
 // Approximate coordinates (°E 0–360). Put photos in public/images/.
 // export const LOCATIONS = [
@@ -38,31 +38,21 @@ export const MARS_RADIUS_KM = 3389.5;
 
 export const LOCATIONS = locationData.map((l) => ({ ...l, elevKm: l.elevation }))
 
-export const MODES = {
-  fastest:    { label: 'Fastest Route', detour: 1.08, roughness: 1.0,  speedKmh: 10 },
-  safest:     { label: 'Safest Route',  detour: 1.25, roughness: 0.55, speedKmh: 8  },
-  scientific: { label: 'Most Science',  detour: 1.18, roughness: 0.8,  speedKmh: 8  },
-};
+export { MODES, MARS_RADIUS_KM, haversineKm } from '../../lib/routeAnalysis.js'
 
 export const DEFAULT_SETTINGS = {
   mode: 'fastest',
   maxSlopeDeg: 15,
   avoidRough: true,
+  avoidLows: true,
+  keepOut: true,
+  maxLegKm: 20,
   showScience: true,
   evaHoursPerSol: 6,
 };
 
 const rad = (d) => (d * Math.PI) / 180;
 const deg = (r) => (r * 180) / Math.PI;
-
-export function haversineKm(a, b) {
-  const dLat = rad(b.lat - a.lat);
-  const dLon = rad(b.lon - a.lon);
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLon / 2) ** 2;
-  return 2 * MARS_RADIUS_KM * Math.asin(Math.sqrt(h));
-}
 
 // Great-circle interpolation, f = 0..1
 function interpolate(a, b, f) {
@@ -91,7 +81,7 @@ function mulberry32(seed) {
 }
 const hash = (s) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7);
 
-// PLACEHOLDER catalogue: swap for real mission data (CRISM, HiRISE, SHARAD...) when available
+// OFFLINE FALLBACK catalogue (only used when NASA elevation cannot be loaded): swap for real mission data (CRISM, HiRISE, SHARAD...) when available
 const SCIENCE_POOL = [
   { title: 'Clay-bearing outcrop',        source: 'MRO CRISM',             detail: 'Phyllosilicate signature – evidence of past liquid water.' },
   { title: 'Ancient delta deposits',      source: 'MRO HiRISE',            detail: 'Layered sediments – prime target for biosignature search.' },
@@ -102,6 +92,7 @@ const SCIENCE_POOL = [
   { title: 'Dust & weather station spot', source: 'MRO MCS',               detail: 'Good location for atmospheric dust and temperature logging.' },
 ];
 
+/** Legacy simulated planner. The app uses services/routePlanner.js, which only falls back to this. */
 export function planRoute(start, end, settings = DEFAULT_SETTINGS) {
   if (!start || !end || start.id === end.id) return null;
   const mode = MODES[settings.mode] ?? MODES.fastest;
@@ -130,60 +121,12 @@ export function planRoute(start, end, settings = DEFAULT_SETTINGS) {
     const slopeBoost = terrain === 'Crater rim' ? 8 : terrain === 'Rough / boulders' ? 5 : 0;
     const slope = Math.min(32, 1.5 + rng() * 9 * rough + slopeBoost);
     const elevKm = base + wave;
-    const tempC = Math.round(-45 - Math.abs(pos.lat) * 0.6 - elevKm * 1.5);
+    const tempC = estimateTempC(pos.lat, elevKm);
 
     points.push({ km: f * distanceKm, ...pos, elevKm: +elevKm.toFixed(3), terrain, slopeDeg: +slope.toFixed(1), tempC });
   }
 
-  let gain = 0, loss = 0;
-  for (let i = 1; i < points.length; i++) {
-    const d = points[i].elevKm - points[i - 1].elevKm;
-    if (d > 0) gain += d; else loss -= d;
-  }
-  const avgSlopeDeg = +(points.reduce((s, p) => s + p.slopeDeg, 0) / points.length).toFixed(1);
-  const maxSlopeDeg = Math.max(...points.map((p) => p.slopeDeg));
-  const minTempC = Math.min(...points.map((p) => p.tempC));
-
-  const kmPerSol = mode.speedKmh * settings.evaHoursPerSol;
-  const sols = Math.max(1, Math.ceil(distanceKm / kmPerSol));
-  // Surface radiation measured by Curiosity's RAD is roughly 0.64 mSv per sol
-  const radiationMsv = +(sols * 0.64).toFixed(1);
-
-  // ---- warnings: merge consecutive bad points into one warning ----
-  const warnings = [];
-  const addRuns = (test, make) => {
-    let s = null;
-    points.forEach((p, i) => {
-      const hit = test(p);
-      if (hit && s === null) s = i;
-      if ((!hit || i === points.length - 1) && s !== null) {
-        const e = hit ? i : i - 1;
-        warnings.push({ ...make(points.slice(s, e + 1)), fromKm: points[s].km, toKm: points[e].km });
-        s = null;
-      }
-    });
-  };
-  addRuns((p) => p.slopeDeg > settings.maxSlopeDeg, (seg) => ({
-    severity: 'critical', title: 'Steep Slope',
-    detail: `Up to ${Math.max(...seg.map((p) => p.slopeDeg)).toFixed(0)}° – exceeds your ${settings.maxSlopeDeg}° limit. Find a detour.`,
-  }));
-  addRuns((p) => p.terrain === 'Rough / boulders', () => ({
-    severity: 'caution', title: 'Rough Terrain', detail: 'Boulder field – reduce speed, risk to wheels and suit abrasion.',
-  }));
-  addRuns((p) => p.terrain === 'Crater rim', () => ({
-    severity: 'caution', title: 'Crater Rim', detail: 'Steep, loose material on the rim. Scout on foot first.',
-  }));
-  if (minTempC < -75) warnings.push({ severity: 'caution', title: 'Extreme Cold', detail: `Estimated down to ${minTempC}°C – check suit heating margins.`, fromKm: 0, toKm: distanceKm });
-  if (sols > 30) warnings.push({ severity: 'caution', title: 'Dust-Storm Exposure', detail: `${sols} sols on the surface – likely to overlap a regional dust storm (solar power and visibility drop).`, fromKm: 0, toKm: distanceKm });
-  if (Math.max(Math.abs(start.lat), Math.abs(end.lat)) > 60) warnings.push({ severity: 'info', title: 'Comms Gaps', detail: 'High latitude – fewer orbiter relay passes.', fromKm: 0, toKm: distanceKm });
-  warnings.sort((a, b) => a.fromKm - b.fromKm);
-  warnings.forEach((w, i) => {
-    w.id = `w${i}`;
-    const p = points.reduce((a, b) => (Math.abs(b.km - w.fromKm) < Math.abs(a.km - w.fromKm) ? b : a));
-    w.lat = p.lat; w.lon = p.lon;
-  });
-
-  // ---- science stops ----
+  // ---- science stops (illustrative only: this planner is the offline fallback) ----
   const stopCount = settings.mode === 'scientific' ? 6 : 4;
   const pool = [...SCIENCE_POOL].sort(() => rng() - 0.5);
   const stops = settings.showScience
@@ -194,18 +137,7 @@ export function planRoute(start, end, settings = DEFAULT_SETTINGS) {
       })
     : [];
 
-  // ---- risk score 0–100 ----
-  const steepShare = points.filter((p) => p.slopeDeg > settings.maxSlopeDeg).length / points.length;
-  const critical = warnings.filter((w) => w.severity === 'critical').length;
-  const risk = Math.min(100, Math.round(steepShare * 120 + critical * 8 + Math.min(sols, 60) * 0.5 + (minTempC < -75 ? 8 : 0)));
-
-  return {
-    start, end, settings, mode: settings.mode, distanceKm, sols,
-    elevationGainKm: +gain.toFixed(2), elevationLossKm: +loss.toFixed(2),
-    avgSlopeDeg, maxSlopeDeg, minTempC, radiationMsv, risk,
-    riskLabel: risk < 25 ? 'Low' : risk < 55 ? 'Moderate' : 'High',
-    points, path: points.map((p) => ({ lat: p.lat, lon: p.lon })), warnings, stops,
-  };
+  return finalizeRoute({ start, end, settings, points, distanceKm, stops, dataSource: { real: false } });
 }
 
 // Each science stop adds ~0.5 sol of work
