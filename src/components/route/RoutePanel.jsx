@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import './route.css';
 import RouteSettings from './RouteSettings';
-import { LOCATIONS, DEFAULT_SETTINGS, planRoute, fmtCoord } from './routeUtils';
+import { LOCATIONS, DEFAULT_SETTINGS, fmtCoord } from './routeUtils';
+import { planAllModes } from '../../services/routePlanner';
 
 function LocationRow({ label, icon, loc, id, setId }) {
   return (
@@ -20,7 +21,7 @@ function LocationRow({ label, icon, loc, id, setId }) {
 
 /**
  * Props:
- *  - onRouteChange(route | null)
+ *  - onRouteChange(route | null, alternatives?)  alternatives maps mode -> route for the comparison card
  *  - onBack (optional)
  *  - initialStartId, initialDestId (optional)
  */
@@ -29,19 +30,32 @@ export default function RoutePanel({ onRouteChange, onBack, initialStartId = 'va
   const [destId, setDestId] = useState(initialDestId);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const latest = useRef(0); // ignore results from an older, slower request
 
   const start = LOCATIONS.find((l) => l.id === startId);
   const dest = LOCATIONS.find((l) => l.id === destId);
 
-  const handlePlan = () => {
-    const route = planRoute(start, dest, settings);
-    if (!route) {
-      setError('Start and destination must be different.');
-      onRouteChange?.(null);
-      return;
-    }
+  const handlePlan = async () => {
+    const id = ++latest.current;
+    setBusy(true);
     setError('');
-    onRouteChange?.(route);
+    try {
+      const result = await planAllModes(start, dest, settings);
+      if (id !== latest.current) return;
+      if (!result) {
+        setError('Start and destination must be different.');
+        onRouteChange?.(null);
+        return;
+      }
+      onRouteChange?.(result.primary, result.alternatives);
+    } catch (e) {
+      if (id !== latest.current) return;
+      setError(e.message || 'Could not plan this route.');
+      onRouteChange?.(null);
+    } finally {
+      if (id === latest.current) setBusy(false);
+    }
   };
 
   // Plan the default route once when the page opens
@@ -72,7 +86,9 @@ export default function RoutePanel({ onRouteChange, onBack, initialStartId = 'va
 
       {error && <p className="rm-error">{error}</p>}
 
-      <button type="button" className="rm-plan" onClick={handlePlan}>🚀 Plan Route</button>
+      <button type="button" className="rm-plan" onClick={handlePlan} disabled={busy}>
+        {busy ? 'Loading NASA terrain…' : '🚀 Plan Route'}
+      </button>
     </aside>
   );
 }

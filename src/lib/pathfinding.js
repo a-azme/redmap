@@ -36,15 +36,18 @@ class MinHeap {
 const NB = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]
 
 export function findPath(grid, start, goal, opts) {
-  const { maxSlope, slopeWeight, bonus = null, minMult = 1 } = opts
-  const { gw, gh, heights, dx, dy } = grid
+  const { maxSlope, slopeWeight, bonus = null, minMult = 1, climb = 0, blocked = null } = opts
+  const { gw, gh, heights, dx, dy, dxRow = null } = grid
+  // dxRow (optional): cell width in km per row, so long routes stay accurate away from the equator
+  const dxAt = (y) => (dxRow ? dxRow[y] : dx)
+  const dxMin = dxRow ? Math.min(...dxRow) : dx
   const N = gw * gh
   const g = new Float32Array(N).fill(Infinity)
   const parent = new Int32Array(N).fill(-1)
   const closed = new Uint8Array(N)
   const si = start.y * gw + start.x
   const gi = goal.y * gw + goal.x
-  const hFn = (x, y) => Math.hypot((x - goal.x) * dx, (y - goal.y) * dy) * minMult
+  const hFn = (x, y) => Math.hypot((x - goal.x) * dxMin, (y - goal.y) * dy) * minMult
 
   const heap = new MinHeap()
   g[si] = 0
@@ -63,12 +66,13 @@ export function findPath(grid, start, goal, opts) {
       if (nx < 0 || ny < 0 || nx >= gw || ny >= gh) continue
       const ni = ny * gw + nx
       if (closed[ni]) continue
-      const d = Math.hypot(ox * dx, oy * dy)
+      if (blocked && blocked[ni]) continue // keep-out zone
+      const d = Math.hypot(ox * dxAt(y), oy * dy)
       const dz = heights[ni] - heights[i]
       const slope = (Math.atan(Math.abs(dz) / d) * 180) / Math.PI
       if (slope > maxSlope) continue
       const mult = (1 + slopeWeight * (slope / 10) ** 2) * (bonus ? bonus[ni] : 1)
-      const ng = g[i] + d * mult
+      const ng = g[i] + d * mult + climb * Math.max(0, dz)
       if (ng < g[ni]) {
         g[ni] = ng
         parent[ni] = i
