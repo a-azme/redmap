@@ -72,6 +72,8 @@
 .rm-risk { font-size: 11.5px; padding: 3px 10px; border-radius: 99px; font-weight: 600; white-space: nowrap; }
 .rm-risk--low { background: rgba(46, 204, 113, .18); color: #4be08a; }
 .rm-risk--moderate { background: rgba(245, 165, 36, .18); color: var(--amber); }
+.rm-risk--min { border: 1px dashed currentColor; }
+.rm-overview__banner { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.4; background: rgba(245, 165, 36, .12); border: 1px solid rgba(245, 165, 36, .4); color: var(--amber); }
 .rm-risk--high { background: rgba(226, 59, 46, .22); color: #ff7b72; }
 .rm-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 16px; margin: 8px 0 0; }
 .rm-stats dt { color: var(--muted); font-size: 11.5px; }
@@ -294,3 +296,14 @@
 .rm-swatches { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 11px; color: var(--muted); }
 .rm-swatches li { display: flex; align-items: center; gap: 5px; }
 .rm-swatches i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+
+.rm-riskbars { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 8px; }
+.rm-riskbars li { display: grid; grid-template-columns: 1fr 90px 34px; gap: 8px; align-items: center; font-size: 12.5px; }
+.rm-riskbars small { display: block; color: var(--muted); font-size: 11px; }
+.rm-riskbar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.08); overflow: hidden; }
+.rm-riskbar i { display: block; height: 100%; background: #f5a524; }
+.rm-riskbars b { text-align: right; font-size: 12px; }
+.rm-legrisk { list-style: none; margin: 4px 0; padding: 0; font-size: 12.5px; display: grid; gap: 4px; }
+.rm-legrisk small { color: var(--muted); margin-left: 4px; }
+.rm-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.rm-dot--low { background: #4be08a; } .rm-dot--moderate { background: #f5a524; } .rm-dot--high { background: #ff4d4d; }

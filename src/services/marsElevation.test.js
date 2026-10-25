@@ -102,3 +102,18 @@ test('tiles are cached, so planning several routes loads each tile once', async 
   await t.prepareTerrain(b)
   assert.equal(srv.calls.n, after1)
 })
+
+test('steps down to a shallower zoom when the server has fewer levels than expected', async () => {
+  const srv = fakeServerStd()
+  const seen = []
+  const loadTile = async (z, x, y) => { seen.push(z); return z > 4 ? null : srv.loadTile(z, x, y) } // levels 5 and 6 do not exist
+  const t = createMarsTerrain({ loadTile })
+  const terrain = await t.prepareTerrain({ bounds: { lonMin: 74, lonMax: 78, latMin: 17, latMax: 21 }, cellKm: 0.8 })
+  assert.equal(terrain.source.real, true)
+  assert.equal(terrain.source.zoom, 4)
+  assert.ok(Math.abs(terrain.heightAt(18.44, 77.45) - trueElev(18.44, 77.45)) < 0.6)
+  // and it remembers, so the next trip does not ask for the missing levels again
+  seen.length = 0
+  await t.prepareTerrain({ bounds: { lonMin: 80, lonMax: 84, latMin: 5, latMax: 9 }, cellKm: 0.8 })
+  assert.ok(seen.every((z) => z <= 4), `asked for zoom ${Math.max(...seen)}`)
+})

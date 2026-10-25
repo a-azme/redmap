@@ -8,15 +8,19 @@
 // simulated planner and the UI says so.
 
 const TREK = 'https://trek.nasa.gov/tiles/Mars/EQ'
-const DEFAULT_PRODUCT = 'Mars_MGS_MOLA_DEM_mosaic_global_463m'
+const DEFAULT_PRODUCT = 'Mars_MGS_MOLA_DEM_mosaic_global_463m_8'
 
 // Override the tile template without touching code: VITE_MARS_DEM_URL in .env
 // e.g. https://trek.nasa.gov/tiles/Mars/EQ/<product>/1.0.0/default/default028mm/{z}/{y}/{x}.{ext}
-const ENV_URL = typeof import.meta !== 'undefined' ? import.meta.env?.VITE_MARS_DEM_URL : undefined
+// A finer product can be swapped in the same way: set VITE_MARS_DEM_URL, VITE_MARS_DEM_MAXZOOM (deepest zoom
+// the product has) and VITE_MARS_DEM_NAME. The grey-to-metres scale is re-fitted against known heights, and
+// the data is rejected (and the simulated planner used) if it does not match.
+const ENV = typeof import.meta !== 'undefined' ? import.meta.env ?? {} : {}
+const ENV_URL = ENV.VITE_MARS_DEM_URL
 export const DEM_SOURCE = {
-  name: 'NASA MGS MOLA elevation (Mars Trek, 463 m)',
+  name: ENV.VITE_MARS_DEM_NAME || (ENV_URL ? 'NASA Mars Trek elevation (custom product)' : 'NASA MGS MOLA elevation (Mars Trek, 463 m)'),
   url: ENV_URL || `${TREK}/${DEFAULT_PRODUCT}/1.0.0/default/default028mm/{z}/{y}/{x}.{ext}`,
-  maxZoom: 6,
+  maxZoom: Math.min(10, Math.max(1, Number(ENV.VITE_MARS_DEM_MAXZOOM) || 6)),
 }
 
 // Km per degree at the Mars surface, and the size of one tile pixel at zoom 0 (km)
@@ -148,6 +152,7 @@ export function createMarsTerrain({ loadTile: rawLoadTile, anchors = ANCHORS, so
     return tileCache.get(k)
   }
   let calibration = null // cached { ok, a, b, r2, rmse, reason, at }
+  let zoomCap = source.maxZoom // the deepest zoom that really has tiles; lowered if the server turns out to have fewer levels
 
   async function calibrate() {
     if (calibration && (calibration.ok || Date.now() - calibration.at < 60_000)) return calibration
@@ -174,28 +179,34 @@ export function createMarsTerrain({ loadTile: rawLoadTile, anchors = ANCHORS, so
     const cal = await calibrate()
     if (!cal.ok) throw new Error(cal.reason)
 
-    // coarsest zoom whose pixels are no bigger than a grid cell, capped at the DEM's native resolution
-    let z = Math.min(source.maxZoom, Math.max(0, Math.ceil(Math.log2(PIXEL_KM_Z0 / cellKm))))
-    const m = () => new Mosaic(z, loadTile)
-    let mosaic = m()
-    let list
+    // coarsest zoom whose pixels are no bigger than a grid cell, capped at the deepest zoom the server really has
+    let z = Math.min(zoomCap, Math.max(0, Math.ceil(Math.log2(PIXEL_KM_Z0 / cellKm))))
+    let mosaic, list
     for (;;) {
-      mosaic = m()
-      const seen = new Map()
-      const step = 180 / mosaic.rows / 2 // half a tile in degrees
-      for (let lat = bounds.latMin; lat <= bounds.latMax + step; lat += step) {
-        for (let lon = bounds.lonMin; lon <= bounds.lonMax + step; lon += step) {
-          const t = mosaic.tileFor(Math.min(bounds.latMax, lat), Math.min(bounds.lonMax, lon))
-          seen.set(mosaic.key(t.x, t.y), t)
+      mosaic = new Mosaic(z, loadTile)
+      for (;;) {
+        const seen = new Map()
+        const step = 180 / mosaic.rows / 2 // half a tile in degrees
+        for (let lat = bounds.latMin; lat <= bounds.latMax + step; lat += step) {
+          for (let lon = bounds.lonMin; lon <= bounds.lonMax + step; lon += step) {
+            const t = mosaic.tileFor(Math.min(bounds.latMax, lat), Math.min(bounds.lonMax, lon))
+            seen.set(mosaic.key(t.x, t.y), t)
+          }
         }
+        list = [...seen.values()]
+        if (list.length <= MAX_TILES || z === 0) break
+        z--
+        mosaic = new Mosaic(z, loadTile)
       }
-      list = [...seen.values()]
-      if (list.length <= MAX_TILES || z === 0) break
+      await mosaic.ensure(list)
+      const missing = list.filter((t) => !mosaic.tiles.get(mosaic.key(t.x, t.y))).length
+      if (missing / list.length <= 0.2) break
+      if (z === 0) throw new Error(`${missing} of ${list.length} elevation tiles failed to load`)
+      // this zoom level is probably not served: remember that and try the next one up
+      console.info(`[RedMap] elevation zoom ${z} has no tiles (${missing} of ${list.length} missing), trying zoom ${z - 1}`)
+      zoomCap = z - 1
       z--
     }
-    await mosaic.ensure(list)
-    const missing = list.filter((t) => !mosaic.tiles.get(mosaic.key(t.x, t.y))).length
-    if (missing / list.length > 0.2) throw new Error(`${missing} of ${list.length} elevation tiles failed to load`)
 
     return {
       heightAt: (lat, lon) => cal.a * mosaic.gray(lat, lon) + cal.b,

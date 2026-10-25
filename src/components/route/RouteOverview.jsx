@@ -30,8 +30,11 @@ export default function RouteOverview({ route, plan = null, selectedStopIds = []
       <div className="rm-overview__main">
         <div className="rm-overview__head">
           <h3>Route Overview</h3>
-          <span className={`rm-risk rm-risk--${route.riskLabel.toLowerCase()}`}>
-            {route.riskLabel} risk · {route.risk}/100
+          <span
+            className={`rm-risk rm-risk--${route.riskLabel.toLowerCase()}${route.riskIsMinimum ? ' rm-risk--min' : ''}`}
+            title={route.riskIsMinimum ? 'Overview only: hazards smaller than the grid are not counted, so real risk is at least this high.' : undefined}
+          >
+            {route.riskLabel} risk · {route.riskIsMinimum ? '≥ ' : ''}{route.risk}/100
           </span>
         </div>
         <p className="rm-muted">{route.start.name} → {route.end.name}</p>
@@ -40,6 +43,11 @@ export default function RouteOverview({ route, plan = null, selectedStopIds = []
             <div key={k}><dt>{k}<SourceChip id={src} /></dt><dd>{v}</dd></div>
           ))}
         </dl>
+        {route.riskIsMinimum && (
+          <p className="rm-overview__banner" role="note">
+            <strong>Overview only.</strong> {route.distanceKm.toLocaleString()} km is too long to plan reliably: the {src?.resolutionKm} km grid hides craters, rims and steep walls, so slope and risk are minimums. Pick closer sites or plan in hops under ~1,000 km.
+          </p>
+        )}
         {src && (
           <p
             className={`rm-source ${src.real ? 'rm-source--real' : 'rm-source--sim'}`}

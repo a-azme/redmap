@@ -1,5 +1,6 @@
 import { fmtClock } from '../../lib/marsTime';
 import SourceChip from './SourceChip';
+import RouteWaypoints from './RouteWaypoints';
 import { evaPlanText, evaPlanJson, downloadText } from '../../lib/exportRoute';
 
 const ICON = { critical: '⛔', caution: '⚠️', info: 'ℹ️' };
@@ -74,6 +75,7 @@ export default function EvaTimeline({ route, plan, date, onDate, travel, onTrave
         <button type="button" className="rm-chip" onClick={() => downloadText(`${file}.txt`, evaPlanText(route, plan))}>Mission card (.txt)</button>
         <button type="button" className="rm-chip" onClick={() => downloadText(`${file}.json`, evaPlanJson(route, plan), 'application/json')}>Data (.json)</button>
       </div>
+      <RouteWaypoints route={route} embedded />
     </section>
   );
 }

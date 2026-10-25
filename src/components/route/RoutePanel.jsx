@@ -25,38 +25,55 @@ function LocationRow({ label, icon, loc, id, setId }) {
  *  - onBack (optional)
  *  - initialStartId, initialDestId (optional)
  */
-export default function RoutePanel({ onRouteChange, onBack, initialStartId = 'valles', initialDestId = 'jezero' }) {
+export default function RoutePanel({ onRouteChange, onBack, initialStartId = 'nili', initialDestId = 'jezero' }) {
   const [startId, setStartId] = useState(initialStartId);
   const [destId, setDestId] = useState(initialDestId);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [refining, setRefining] = useState(false);
   const latest = useRef(0); // ignore results from an older, slower request
+  const first = useRef(0); // id of the request whose first result is already on screen
 
   const start = LOCATIONS.find((l) => l.id === startId);
   const dest = LOCATIONS.find((l) => l.id === destId);
 
   const handlePlan = async () => {
-    const id = ++latest.current;
-    setBusy(true);
-    setError('');
+    const id = ++latest.current
+    setBusy(true)
+    setRefining(false)
+    setError('')
+    const stale = () => id !== latest.current
     try {
-      const result = await planAllModes(start, dest, settings);
-      if (id !== latest.current) return;
+      const result = await planAllModes(start, dest, settings, {
+        cancelled: stale,
+        onUpdate: ({ primary, alternatives, done }) => {
+          if (stale()) return
+          if (first.current !== id) {
+            // first result: show the route now and let the other modes fill in behind it
+            first.current = id
+            onRouteChange?.(primary, alternatives)
+            setBusy(false)
+            setRefining(!done)
+          } else {
+            onRouteChange?.(primary, alternatives, { update: true })
+            setRefining(!done)
+          }
+        },
+      })
+      if (stale()) return
       if (!result) {
-        setError('Start and destination must be different.');
-        onRouteChange?.(null);
-        return;
+        setError('Start and destination must be different.')
+        onRouteChange?.(null)
       }
-      onRouteChange?.(result.primary, result.alternatives);
     } catch (e) {
-      if (id !== latest.current) return;
-      setError(e.message || 'Could not plan this route.');
-      onRouteChange?.(null);
+      if (stale()) return
+      setError(e.message || 'Could not plan this route.')
+      onRouteChange?.(null)
     } finally {
-      if (id === latest.current) setBusy(false);
+      if (!stale()) { setBusy(false); setRefining(false) }
     }
-  };
+  }
 
   // Plan the default route once when the page opens
   useEffect(() => {
@@ -89,6 +106,7 @@ export default function RoutePanel({ onRouteChange, onBack, initialStartId = 'va
       <button type="button" className="rm-plan" onClick={handlePlan} disabled={busy}>
         {busy ? 'Loading NASA terrain…' : '🚀 Plan Route'}
       </button>
+      {refining && <p className="rm-muted">Comparing the other modes…</p>}
     </aside>
   );
 }

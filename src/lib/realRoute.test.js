@@ -77,7 +77,7 @@ test('very long route (Valles to Jezero) uses a coarse grid and says so', async 
   const spec = gridSpec(VALLES, JEZERO)
   assert.ok(spec.cellKm > 10)
   const r = await planRealRoute(VALLES, JEZERO, settings(), terrainOf(() => -2))
-  assert.ok(r.warnings.some((w) => w.title === 'Coarse terrain model'))
+  assert.ok(r.warnings.some((w) => w.title === 'Coarse terrain model' || w.title === 'Overview route only'))
 })
 
 test('route object has every field the UI reads', async () => {
@@ -197,4 +197,14 @@ test('a destination inside a pit is flagged as low ground', async () => {
   const r = await planRealRoute(NILI, JEZERO, settings({ showScience: false }), terrainOf(bowl))
   assert.ok(r.points.some((p) => p.terrain === 'Low ground'))
   assert.ok(r.warnings.some((w) => w.title === 'Low Ground'))
+})
+
+test('long trips are flagged as overview only and the risk is a minimum', async () => {
+  const long = await planRealRoute(VALLES, JEZERO, settings(), terrainOf(() => -2))
+  assert.equal(long.reliability, 'overview')
+  assert.equal(long.riskIsMinimum, true)
+  assert.ok(long.warnings.some((w) => w.title === 'Overview route only' && /too long/.test(w.detail)))
+  const short = await planRealRoute(NILI, JEZERO, settings(), terrainOf(() => -2))
+  assert.notEqual(short.reliability, 'overview')
+  assert.equal(short.riskIsMinimum, false)
 })

@@ -44,26 +44,6 @@ export default function RouteSettings({ value, onChange }) {
           </label>
 
           <label className="rm-check">
-            <input type="checkbox" checked={value.avoidRough}
-              onChange={(e) => set({ avoidRough: e.target.checked })} />
-            Avoid rough terrain
-          </label>
-          <label className="rm-check">
-            <input type="checkbox" checked={value.avoidLows !== false}
-              onChange={(e) => set({ avoidLows: e.target.checked })} />
-            Avoid low spots (craters, pits)
-          </label>
-          <label className="rm-check">
-            <input type="checkbox" checked={value.keepOut !== false}
-              onChange={(e) => set({ keepOut: e.target.checked })} />
-            Keep out of no-go zones
-          </label>
-          <label className="rm-field">
-            <span>Max leg length <b>{value.maxLegKm ?? 20} km</b></span>
-            <input type="range" min="5" max="50" step="5" value={value.maxLegKm ?? 20}
-              onChange={(e) => set({ maxLegKm: +e.target.value })} />
-          </label>
-          <label className="rm-check">
             <input type="checkbox" checked={value.showScience}
               onChange={(e) => set({ showScience: e.target.checked })} />
             Suggest science stops

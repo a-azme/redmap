@@ -25,6 +25,8 @@ export const ROUTE_MODES = {
     bumpWeight: 0.5,
     keepOut: { steepDeg: 20, lowKm: 1.6, bumpDeg: 12 },
     climbKmPerKm: 4,
+    crossWeight: 0.3,
+    rimWeight: 0.3,
   },
   safest: {
     label: 'Safest',
@@ -36,6 +38,8 @@ export const ROUTE_MODES = {
     bumpWeight: 2.5,
     keepOut: { steepDeg: 10, lowKm: 0.9, bumpDeg: 7 },
     climbKmPerKm: 16,
+    crossWeight: 2.5,
+    rimWeight: 2.5,
   },
   scientific: {
     label: 'Most Scientific',
@@ -47,6 +51,8 @@ export const ROUTE_MODES = {
     bumpWeight: 1,
     keepOut: { steepDeg: 15, lowKm: 1.3, bumpDeg: 9 },
     climbKmPerKm: 6,
+    crossWeight: 1,
+    rimWeight: 0.8,
     sciBonus: 0.5,
     sciRadiusKm: 8,
     maxDetour: 0.35,
@@ -54,5 +60,17 @@ export const ROUTE_MODES = {
 }
 
 // Planning defaults for operations (both can be changed in Route Settings)
-export const DEFAULT_MAX_LEG_KM = 20   // a checkpoint is added at least this often
 export const RETRACE_MAX_SLOPE = 12    // a leg steeper than this is hard to climb back out of
+
+// Blends a mode's settings toward Safest (t = 0 is the mode itself, t = 1 is Safest). The planner searches for the
+// best t for each mode's goal (see lib/balanced.js).
+const lerp = (a, b, t) => a + (b - a) * t
+export function blendMode(t, from = 'fastest') {
+  const f = ROUTE_MODES[from] ?? ROUTE_MODES.fastest, s = ROUTE_MODES.safest
+  const out = { ...f, label: f.label, blend: t }
+  for (const k of ['maxSlope', 'slopeWeight', 'roughWeight', 'lowWeight', 'bumpWeight', 'climbKmPerKm', 'crossWeight', 'rimWeight']) out[k] = +lerp(f[k], s[k], t).toFixed(2)
+  out.keepOut = {}
+  for (const k of Object.keys(f.keepOut)) out.keepOut[k] = +lerp(f.keepOut[k], s.keepOut[k], t).toFixed(2)
+  return out
+}
+export const MODERATE_RISK_MAX = 40   // Fastest and Most Science never go above this
