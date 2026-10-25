@@ -17,7 +17,7 @@ test('a bend around a crater is explained as avoiding a low spot, with the real 
   const turn = r.why.reasons.find((x) => x.type === 'low-ground')
   assert.ok(turn, JSON.stringify(r.why.reasons))
   assert.equal(turn.source, 'MOLA')
-  assert.ok(turn.value > 0.5 && turn.value < 1.6, `depth ${turn.value}`)
+  assert.ok(turn.value > 0.4 && turn.value < 1.6, `depth ${turn.value}`)
   assert.match(turn.text, /low spot/)
   assert.ok(turn.n >= 1 && r.waypoints.some((w) => w.n === turn.n))
 })

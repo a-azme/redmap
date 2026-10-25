@@ -5,7 +5,7 @@ const ROWS = [
   ['Time', (r) => `${r.sols} sols`],
   ['Max slope', (r) => `${r.maxSlopeDeg.toFixed(0)}°`],
   ['Climb', (r) => `+${r.elevationGainKm} km`],
-  ['Risk', (r) => `${r.riskLabel} · ${r.risk}`],
+  ['Risk', (r) => `${r.riskLabel} · ${r.riskIsMinimum ? '≥ ' : ''}${r.risk}`],
   ['Science sites', (r) => r.stops.length],
 ];
 
@@ -25,7 +25,7 @@ export default function RouteCompare({ routes, current, onSelect }) {
               <th key={m}>
                 <button
                   type="button"
-                  disabled={!!routes[m]?.error}
+                  disabled={!routes[m] || !!routes[m]?.error}
                   className={`rm-compare__mode ${current.mode === m ? 'is-active' : ''}`}
                   onClick={() => onSelect(routes[m])}
                 >
@@ -42,7 +42,7 @@ export default function RouteCompare({ routes, current, onSelect }) {
               <td>{label}</td>
               {modes.map((m) => (
                 <td key={m} className={current.mode === m ? 'is-active' : ''}>
-                  {routes[m]?.error ? '–' : fmt(routes[m])}
+                  {!routes[m] ? '…' : routes[m].error ? '–' : fmt(routes[m])}
                 </td>
               ))}
             </tr>
@@ -54,7 +54,8 @@ export default function RouteCompare({ routes, current, onSelect }) {
           {modes.filter((m) => routes[m]?.error).map((m) => `${MODES[m].label}: ${routes[m].error}`).join(' ')}
         </p>
       )}
-      <p className="rm-muted">Coloured lines on the map match the columns; the white dashed line is the selected route.</p>
+      {modes.some((m) => !routes[m]) && <p className="rm-muted">Planning the other modes…</p>}
+      <p className="rm-muted">The map shows the selected route. Click a column to switch.</p>
     </section>
   );
 }

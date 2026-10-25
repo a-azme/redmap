@@ -44,9 +44,6 @@ export const DEFAULT_SETTINGS = {
   mode: 'fastest',
   maxSlopeDeg: 15,
   avoidRough: true,
-  avoidLows: true,
-  keepOut: true,
-  maxLegKm: 20,
   showScience: true,
   evaHoursPerSol: 6,
 };

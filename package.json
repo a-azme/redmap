@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "node --test src/lib/realRoute.test.js src/lib/evaPlan.test.js src/lib/why.test.js src/lib/legs.test.js src/services/marsElevation.test.js"
+    "test": "node --test src/lib/realRoute.test.js src/lib/evaPlan.test.js src/lib/why.test.js src/lib/legs.test.js src/lib/balanced.test.js src/services/marsElevation.test.js"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

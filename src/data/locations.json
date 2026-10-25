@@ -4,5 +4,9 @@
   { "id": "valles", "name": "Valles Marineris", "type": "Canyon", "tag": "Geological Feature", "lat": -13.9, "lon": 301.0, "elevation": -4.0, "color": "#22c55e" },
   { "id": "tyrrhena", "name": "Tyrrhena Terra", "type": "Terrain", "tag": "Ancient Highlands", "lat": -15.0, "lon": 90.0, "elevation": 1.2, "color": "#f59e0b" },
   { "id": "nili", "name": "Nili Fossae", "type": "Trough", "tag": "Clay & Carbonates", "lat": 21.0, "lon": 74.5, "elevation": -0.6, "color": "#a855f7" },
-  { "id": "isidis", "name": "Isidis Planitia", "type": "Plain", "tag": "Impact Basin", "lat": 12.9, "lon": 87.0, "elevation": -3.8, "color": "#06b6d4" }
+  { "id": "isidis", "name": "Isidis Planitia", "type": "Plain", "tag": "Impact Basin", "lat": 12.9, "lon": 87.0, "elevation": -3.8, "color": "#06b6d4" },
+  { "id": "butler", "name": "Octavia E. Butler Landing", "type": "Landing Site", "tag": "Perseverance Landing", "lat": 18.4446, "lon": 77.4509, "elevation": -2.6, "color": "#f43f5e" },
+  { "id": "delta", "name": "Jezero Delta Front", "type": "Delta", "tag": "Ancient River Delta", "lat": 18.47, "lon": 77.35, "elevation": -2.5, "color": "#14b8a6" },
+  { "id": "neretva", "name": "Neretva Vallis Inlet", "type": "Valley", "tag": "Ancient River Channel", "lat": 18.6, "lon": 77.1, "elevation": -2.2, "color": "#eab308" },
+  { "id": "syrtis", "name": "Syrtis Major", "type": "Volcanic Plain", "tag": "Dark Volcanic Region", "lat": 8.4, "lon": 69.5, "elevation": 0.3, "color": "#8b5cf6" }
 ]

@@ -9,7 +9,6 @@ import ScienceStops from '../components/route/ScienceStops'
 import DestinationInfo from '../components/route/DestinationInfo'
 import EvaTimeline from '../components/route/EvaTimeline'
 import RouteCompare from '../components/route/RouteCompare'
-import RouteWaypoints from '../components/route/RouteWaypoints'
 import RouteWhy from '../components/route/RouteWhy'
 import { planEva } from '../lib/evaPlan'
 
@@ -41,11 +40,19 @@ export default function RoutePlannerPage() {
     return (
     <div className="rm-page">
       <div className="rm-mapwrap">
-        <RouteMap route={route} alternatives={alternatives} hazard={hazard} layer={layer} mode={mode} selectedStopIds={selected} />
+        <RouteMap route={route} hazard={hazard} layer={layer} mode={mode} selectedStopIds={selected} />
       </div>
 
       <div className="rm-layout">
-        <RoutePanel onBack={() => navigate('/')} onRouteChange={(r, alts) => { setRoute(r); setAlternatives(alts ?? null); setSelected([]) }} />
+        <RoutePanel onBack={() => navigate('/')} onRouteChange={(r, alts, meta) => {
+          setAlternatives(alts ?? null)
+          if (meta?.update) {
+            // later steps of the same request: refresh the comparison, and swap in the refined version of the route being viewed
+            if (r) setRoute((cur) => (cur && cur.mode === r.mode && cur.start.id === r.start.id && cur.end.id === r.end.id ? r : cur))
+            return
+          }
+          setRoute(r); setSelected([])
+        }} />
 
         <div className="rm-topbar">
           <div className="rm-viewtoggle">
@@ -62,10 +69,9 @@ export default function RoutePlannerPage() {
 
         <div className="rm-right">
           <RouteCompare routes={alternatives} current={route} onSelect={(r) => { setRoute(r); setSelected([]) }} />
-          <RouteWhy route={route} hazard={hazard} onHazard={setHazard} />
+          <RouteWhy route={route} hazard={hazard} onHazard={setHazard} plan={plan} />
           <DestinationInfo route={route} onDetails={() => navigate('/missions')} />
           <EvaTimeline route={route} plan={plan} date={evaDate} onDate={setEvaDate} travel={travel} onTravel={setTravel} />
-          <RouteWaypoints route={route} />
           <RouteWarnings route={route} />
           <ScienceStops route={route} selectedIds={selected} onToggle={toggleStop} />
         </div>

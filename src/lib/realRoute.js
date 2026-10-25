@@ -4,8 +4,8 @@
 // `{ heightAt(lat, lon) -> km, source }`. In the app that is the NASA MOLA
 // sampler (services/marsElevation.js); in tests it is a synthetic surface.
 
-import { ROUTE_MODES, POI_NEAR_KM, DEFAULT_MAX_LEG_KM, RETRACE_MAX_SLOPE } from '../constants/config.js'
-import { findPath } from './pathfinding.js'
+import { ROUTE_MODES, blendMode, POI_NEAR_KM, RETRACE_MAX_SLOPE } from '../constants/config.js'
+import { findPath, cellGradient, crossSlopeDeg } from './pathfinding.js'
 import { haversineKm, finalizeRoute, estimateTempC, MARS_RADIUS_KM } from './routeAnalysis.js'
 
 const RAD = Math.PI / 180
@@ -20,7 +20,7 @@ export class RouteError extends Error {
 }
 
 /** Bounding box + grid size for a start/end pair. Longitudes are unwrapped around lonMid. */
-export function gridSpec(start, end, { maxCells = 220, minCellKm = 0.5 } = {}) {
+export function gridSpec(start, end, { maxCells = 300, minCellKm = 0.5 } = {}) {
   const dLon = wrapLon(end.lon - start.lon)
   const lonMid = start.lon + dLon / 2
   const latMid = (start.lat + end.lat) / 2
@@ -70,12 +70,22 @@ export function buildGrid(spec, heightAt) {
   const latSpan = b.latMax - b.latMin
   let heights = new Float32Array(gw * gh)
   let bad = 0, sum = 0
+  // Coarse cells (long trips) are much bigger than the DEM pixels, so one sample per cell would pick up
+  // pixel-scale noise and make smooth ground look steep and bumpy. Average a few samples across each cell instead.
+  const k = spec.cellKm > 3 ? clamp(Math.round(spec.cellKm / 3), 2, 4) : 1
+  const dLat = latSpan / (gh - 1), dLon = lonSpan / (gw - 1)
   for (let y = 0; y < gh; y++) {
     const lat = b.latMax - (y / (gh - 1)) * latSpan
     for (let x = 0; x < gw; x++) {
-      const lon = to360(b.lonMin + (x / (gw - 1)) * lonSpan)
-      const h = heightAt(lat, lon)
-      if (Number.isFinite(h)) { heights[y * gw + x] = h; sum += h } else { heights[y * gw + x] = NaN; bad++ }
+      const lon0 = b.lonMin + (x / (gw - 1)) * lonSpan
+      let h = 0, n = 0
+      for (let sy = 0; sy < k; sy++) {
+        for (let sx = 0; sx < k; sx++) {
+          const v = k === 1 ? heightAt(lat, to360(lon0)) : heightAt(Math.max(-89.9, Math.min(89.9, lat + (((sy + 0.5) / k) - 0.5) * dLat)), to360(lon0 + (((sx + 0.5) / k) - 0.5) * dLon))
+          if (Number.isFinite(v)) { h += v; n++ }
+        }
+      }
+      if (n) { heights[y * gw + x] = h / n; sum += h / n } else { heights[y * gw + x] = NaN; bad++ }
     }
   }
   if (bad / heights.length > 0.05) throw new RouteError('no_data', 'Elevation data does not cover this area.')
@@ -130,7 +140,9 @@ function slopeAt(g, fx, fy) {
   return Math.atan(Math.hypot(gx, gy)) / RAD
 }
 
-function classify(slope, depthKm = 0) {
+const RIM_RISE_KM = 0.25, RIM_SLOPE_DEG = 6
+function classify(slope, depthKm = 0, riseKm = 0) {
+  if (riseKm >= RIM_RISE_KM && slope >= RIM_SLOPE_DEG) return 'Crater rim'
   if (depthKm >= LOW_GROUND_KM && slope < 6) return 'Low ground'
   if (slope < 2) return 'Smooth plain'
   if (slope < 6) return 'Undulating'
@@ -142,11 +154,13 @@ function classify(slope, depthKm = 0) {
  * Any-angle post-processing of the grid path ("string pulling"): replace a stretch of the staircase
  * path by a straight line when that line stays under the slope limit and costs no more.
  */
-export function shortcutPath(grid, nodes, { maxSlope, slopeWeight, bonus, climb = 0, blocked = null }) {
+function makeStepCost(grid, { maxSlope, slopeWeight, bonus, climb = 0, blocked = null, crossWeight = 0 }) {
   const bonusAt = (fx, fy) => (bonus ? bonus[Math.round(fy) * grid.gw + Math.round(fx)] : 1)
-  const stepCost = (x0, y0, x1, y1) => {
+  const grad = crossWeight ? cellGradient(grid) : null
+  return (x0, y0, x1, y1) => {
     const ym = Math.round((y0 + y1) / 2)
-    const lenKm = Math.hypot((x1 - x0) * grid.dxRow[ym], (y1 - y0) * grid.dy)
+    const ex = (x1 - x0) * grid.dxRow[ym], ey = (y1 - y0) * grid.dy
+    const lenKm = Math.hypot(ex, ey)
     const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) * 2))
     const d = lenKm / n
     let cost = 0
@@ -156,27 +170,113 @@ export function shortcutPath(grid, nodes, { maxSlope, slopeWeight, bonus, climb 
       const h1 = bilinear(grid, x, y)
       const slope = (Math.atan(Math.abs(h1 - h0) / d) * 180) / Math.PI
       if (slope > maxSlope) return Infinity
-      if (blocked && blocked[Math.round(y) * grid.gw + Math.round(x)]) return Infinity
-      cost += d * (1 + slopeWeight * (slope / 10) ** 2) * bonusAt(x, y) + climb * Math.max(0, h1 - h0)
+      const ci = Math.round(y) * grid.gw + Math.round(x)
+      if (blocked && blocked[ci]) return Infinity
+      const side = grad ? crossWeight * (crossSlopeDeg(grad.gx[ci], grad.gy[ci], ex, ey) / 10) ** 2 : 0
+      cost += d * (1 + slopeWeight * (slope / 10) ** 2 + side) * bonusAt(x, y) + climb * Math.max(0, h1 - h0)
       h0 = h1
     }
     return cost
   }
-  const edge = nodes.map((p, i) => (i ? stepCost(nodes[i - 1].fx, nodes[i - 1].fy, p.fx, p.fy) : 0))
-  const out = [nodes[0]]
-  let i = 0
-  while (i < nodes.length - 1) {
-    let best = i + 1
-    let along = edge[i + 1]
-    for (let j = i + 2; j < Math.min(nodes.length, i + 80); j++) {
-      along += edge[j]
-      const direct = stepCost(nodes[i].fx, nodes[i].fy, nodes[j].fx, nodes[j].fy)
-      if (direct <= along * 1.0005) best = j
+}
+
+export function shortcutPath(grid, nodes, opts, pins = []) {
+  const stepCost = makeStepCost(grid, opts)
+  const isPin = (n) => pins.some((q) => Math.abs(q.x - n.fx) < 1e-6 && Math.abs(q.y - n.fy) < 1e-6)
+  // first pass looks 80 nodes ahead (the staircase path is long); later passes see the whole, much shorter, list
+  let cur = nodes
+  for (let pass = 0; pass < 3; pass++) {
+    const reach = pass === 0 ? 80 : cur.length
+    const edge = cur.map((p, i) => (i ? stepCost(cur[i - 1].fx, cur[i - 1].fy, p.fx, p.fy) : 0))
+    const out = [cur[0]]
+    let i = 0
+    while (i < cur.length - 1) {
+      let best = i + 1
+      let along = edge[i + 1]
+      for (let j = i + 2; j < Math.min(cur.length, i + reach); j++) {
+        if (isPin(cur[j - 1])) break // never jump over a science waypoint
+        along += edge[j]
+        const direct = stepCost(cur[i].fx, cur[i].fy, cur[j].fx, cur[j].fy)
+        if (direct <= along * 1.0005) best = j
+      }
+      out.push(cur[best])
+      i = best
     }
-    out.push(nodes[best])
-    i = best
+    if (out.length === cur.length) break
+    cur = out
+  }
+  return cur
+}
+
+/** Splits long segments so the relaxation below has enough points to bend the route smoothly. */
+export function subdividePath(nodes, maxCells = 6) {
+  const out = [nodes[0]]
+  for (let i = 1; i < nodes.length; i++) {
+    const a = nodes[i - 1], b = nodes[i]
+    const n = Math.ceil(Math.hypot(b.fx - a.fx, b.fy - a.fy) / maxCells)
+    for (let k = 1; k < n; k++) out.push({ fx: a.fx + ((b.fx - a.fx) * k) / n, fy: a.fy + ((b.fy - a.fy) * k) / n })
+    out.push(b)
   }
   return out
+}
+
+/**
+ * Pulls the route taut (an "elastic band"): each point is moved towards the middle of its neighbours whenever that
+ * makes the path cheaper and keeps it inside the slope limit and out of no-go zones. Removes the wobble that is left
+ * over from the grid, so the route gets shorter and smoother. Science waypoints (pins) stay where they are.
+ */
+export function relaxPath(grid, nodes, opts, pins = [], iterations = 12) {
+  if (nodes.length < 3) return nodes
+  const stepCost = makeStepCost(grid, opts)
+  const pinned = nodes.map((n, i) => i === 0 || i === nodes.length - 1 || pins.some((q) => Math.hypot(q.x - n.fx, q.y - n.fy) < 2))
+  const cur = nodes.map((n) => ({ ...n }))
+  const seg = (a, b) => stepCost(a.fx, a.fy, b.fx, b.fy)
+  for (let it = 0; it < iterations; it++) {
+    let moved = 0
+    for (let i = 1; i < cur.length - 1; i++) {
+      if (pinned[i]) continue
+      const p = cur[i - 1], c = cur[i], n = cur[i + 1]
+      const now = seg(p, c) + seg(c, n)
+      const mx = (p.fx + n.fx) / 2, my = (p.fy + n.fy) / 2
+      for (const w of [1, 0.5, 0.25]) {
+        const cand = { fx: c.fx + (mx - c.fx) * w, fy: c.fy + (my - c.fy) * w }
+        const cost = seg(p, cand) + seg(cand, n)
+        if (Number.isFinite(cost) && cost < now - 1e-6) { cur[i] = cand; moved++; break }
+      }
+    }
+    if (!moved) break
+  }
+  return cur
+}
+
+/**
+ * Rounds the corners of the route (corner cutting, two passes). A corner is only rounded when both new
+ * segments are still allowed (slope limit, no-go zones) and the rounded path is not more than 3% costlier,
+ * so the line looks like a real track without ever leaving safe ground.
+ */
+export function smoothPath(grid, nodes, opts, passes = 2, pins = []) {
+  const stepCost = makeStepCost(grid, opts)
+  const seg = (a, b) => stepCost(a.fx, a.fy, b.fx, b.fy)
+  let cur = nodes
+  for (let pass = 0; pass < passes; pass++) {
+    if (cur.length < 3) break
+    const out = [cur[0]]
+    for (let i = 1; i < cur.length - 1; i++) {
+      const p = cur[i - 1], c = cur[i], n = cur[i + 1]
+      // never move the route off a science waypoint it was asked to pass through
+      if (pins.some((q) => Math.hypot(q.x - c.fx, q.y - c.fy) < 2)) { out.push(c); continue }
+      const q = { fx: c.fx + (p.fx - c.fx) * 0.25, fy: c.fy + (p.fy - c.fy) * 0.25 }
+      const r = { fx: c.fx + (n.fx - c.fx) * 0.25, fy: c.fy + (n.fy - c.fy) * 0.25 }
+      const before = seg(q, c) + seg(c, r)
+      const after = seg(q, r)
+      const ends = seg(out[out.length - 1], q) + seg(r, n)
+      if (Number.isFinite(after) && Number.isFinite(ends) && after <= before * 1.03) out.push(q, r)
+      else out.push(c)
+    }
+    out.push(cur[cur.length - 1])
+    cur = out
+  }
+  return cur
 }
 
 /** Nearest distance (km) from a site to the route polyline, and how far along the route that is. */
@@ -199,7 +299,7 @@ function nearestOnRoute(p, ll, cum) {
  * Craters floors, pits and troughs show up here even when their slopes are gentle.
  * Uses a summed-area table so any window size costs the same.
  */
-export function lowGround(g, radiusKm) {
+export function lowGround(g, radiusKm, mode = 'low') {
   const w = g.gw, h = g.gh
   const S = new Float64Array((w + 1) * (h + 1))
   for (let y = 0; y < h; y++) {
@@ -218,7 +318,8 @@ export function lowGround(g, radiusKm) {
       const x0 = Math.max(0, x - rx), x1 = Math.min(w - 1, x + rx)
       const sum = S[(y1 + 1) * (w + 1) + x1 + 1] - S[y0 * (w + 1) + x1 + 1] - S[(y1 + 1) * (w + 1) + x0] + S[y0 * (w + 1) + x0]
       const mean = sum / ((x1 - x0 + 1) * (y1 - y0 + 1))
-      out[y * w + x] = Math.max(0, mean - g.heights[y * w + x])
+      const dh = mode === 'high' ? g.heights[y * w + x] - mean : mean - g.heights[y * w + x]
+      out[y * w + x] = Math.max(0, dh)
     }
   }
   return out
@@ -254,15 +355,21 @@ function ruggedness(g) {
 export function bumpiness(g, scalesKm = [1.5, 4, 10]) {
   const w = g.gw, h = g.gh
   const out = new Float32Array(w * h)
+  const seen = new Set()
   for (const s of scalesKm) {
     const ry = Math.max(1, Math.round(s / g.dy))
+    // grids with big cells cannot tell the scales apart: measure each distinct step once
+    const sig = `${ry}`
+    if (seen.has(sig)) continue
+    seen.add(sig)
     for (let y = ry; y < h - ry; y++) {
       const rx = Math.max(1, Math.round(s / g.dxRow[y]))
+      const stepX = rx * g.dxRow[y], stepY = ry * g.dy // the real distance between the three samples, in km
       for (let x = rx; x < w - rx; x++) {
         const c = g.heights[y * w + x]
         const lx = g.heights[y * w + x - rx] + g.heights[y * w + x + rx] - 2 * c
         const ly = g.heights[(y - ry) * w + x] + g.heights[(y + ry) * w + x] - 2 * c
-        const ang = Math.atan((Math.abs(lx) + Math.abs(ly)) / (2 * s)) / RAD
+        const ang = Math.atan(Math.abs(lx) / (2 * stepX) + Math.abs(ly) / (2 * stepY)) / RAD
         if (ang > out[y * w + x]) out[y * w + x] = ang
       }
     }
@@ -349,16 +456,30 @@ function routeThrough(grid, cells, cost, minMult) {
  * Numbered navigation waypoints: the science stops on the route plus the main turning points
  * (where the straightened path changes direction), in travel order.
  */
-export function buildWaypoints(ll, cum, total, distanceKm, stops, { maxTurns = 6, minTurnDeg = 12, maxLegKm = Infinity } = {}) {
+export function buildWaypoints(ll, cum, total, distanceKm, stops, { maxTurns = 6, minTurnDeg = 12 } = {}) {
   const km = (c) => (c / total) * distanceKm
   const bearing = (a, b) => {
     const e = wrapLon(b.lon - a.lon) * Math.cos(((a.lat + b.lat) / 2) * RAD)
     return Math.atan2(e, b.lat - a.lat) / RAD
   }
+  // A turn is how much the heading changes over a stretch of route (not just between two neighbouring points), so a
+  // smooth bend counts as one turn instead of many tiny ones. Only the sharpest point of each bend is kept.
+  const span = Math.max(6, distanceKm * 0.04) * (total / distanceKm)
+  const windowed = ll.map((_, i) => {
+    if (i === 0 || i === ll.length - 1) return 0
+    let a = i - 1, b = i + 1
+    while (a > 0 && cum[i] - cum[a] < span) a--
+    while (b < ll.length - 1 && cum[b] - cum[i] < span) b++
+    return Math.abs(wrapLon(bearing(ll[i], ll[b]) - bearing(ll[a], ll[i])))
+  })
   const turns = []
   for (let i = 1; i < ll.length - 1; i++) {
-    const t = Math.abs(wrapLon(bearing(ll[i], ll[i + 1]) - bearing(ll[i - 1], ll[i])))
-    if (t >= minTurnDeg) turns.push({ kind: 'turn', turnDeg: t, idx: i, km: km(cum[i]), lat: ll[i].lat, lon: ll[i].lon })
+    const t = windowed[i]
+    if (t < minTurnDeg) continue
+    let isPeak = true
+    for (let k = i - 1; k >= 1 && cum[i] - cum[k] < span; k--) if (windowed[k] > t) isPeak = false
+    for (let k = i + 1; k < ll.length - 1 && cum[k] - cum[i] < span; k++) if (windowed[k] >= t) isPeak = false
+    if (isPeak) turns.push({ kind: 'turn', turnDeg: t, idx: i, km: km(cum[i]), lat: ll[i].lat, lon: ll[i].lon })
   }
   const gap = Math.max(5, distanceKm * 0.06) // keep waypoints from piling up
   const picked = stops.map((s) => ({ kind: 'stop', id: s.id, name: s.title, note: s.detail, source: s.source, km: s.km, lat: s.lat, lon: s.lon, elevKm: s.elevKm }))
@@ -368,35 +489,13 @@ export function buildWaypoints(ll, cum, total, distanceKm, stops, { maxTurns = 6
     if (picked.some((w) => Math.abs(w.km - t.km) < gap)) continue
     picked.push(t)
   }
-  // checkpoints: no leg between two waypoints may be longer than maxLegKm
-  const at = (kmAlong) => {
-    const target = (kmAlong / distanceKm) * total
-    let i = 0
-    while (i < cum.length - 2 && cum[i + 1] < target) i++
-    const t = clamp((target - cum[i]) / (cum[i + 1] - cum[i] || 1), 0, 1)
-    return {
-      lat: ll[i].lat + (ll[i + 1].lat - ll[i].lat) * t,
-      lon: ll[i].lon + wrapLon(ll[i + 1].lon - ll[i].lon) * t,
-    }
-  }
-  if (Number.isFinite(maxLegKm)) {
-    const marks = [0, ...picked.map((w) => w.km).sort((a, b) => a - b), distanceKm]
-    for (let i = 0; i < marks.length - 1; i++) {
-      const gapKm = marks[i + 1] - marks[i]
-      const pieces = Math.ceil(gapKm / maxLegKm)
-      for (let k = 1; k < pieces; k++) {
-        const kmAlong = marks[i] + (gapKm * k) / pieces
-        picked.push({ kind: 'checkpoint', km: kmAlong, ...at(kmAlong) })
-      }
-    }
-  }
   return picked
     .sort((a, b) => a.km - b.km)
     .map((w, i) => ({
       ...w,
       n: i + 1,
       lon: to360(w.lon),
-      name: w.kind === 'stop' ? w.name : w.kind === 'checkpoint' ? `Checkpoint ${i + 1}` : `Waypoint ${i + 1}`,
+      name: w.kind === 'stop' ? w.name : `Waypoint ${i + 1}`,
       km: Math.round(w.km),
     }))
 }
@@ -450,8 +549,20 @@ export function sourceKey(src = '') {
  */
 export function explainRoute(grid, layers, nodes, cum, total, waypoints, direct, actual, limits) {
   const reasons = []
+  // the bend that sits furthest from the straight line is the one that gets the credit for dodging a no-go zone
+  // the straight line crosses (a smooth arc may have no local chord that touches the zone)
+  const A = nodes[0], Z = nodes[nodes.length - 1]
+  const kmXY = (n) => [n.fx * grid.dxRow[Math.round(n.fy)], n.fy * grid.dy]
+  const [ax, ay] = kmXY(A), [zx, zy] = kmXY(Z)
+  const lineLen = Math.hypot(zx - ax, zy - ay) || 1
+  let biggestN = null, biggestOff = -1
   for (const w of waypoints) {
-    if (w.kind === 'checkpoint') continue
+    if (w.kind === 'stop') continue
+    const [px, py] = kmXY(nodes[w.idx])
+    const off = Math.abs((zx - ax) * (ay - py) - (ax - px) * (zy - ay)) / lineLen
+    if (off > biggestOff) { biggestOff = off; biggestN = w.n }
+  }
+  for (const w of waypoints) {
     if (w.kind === 'stop') {
       reasons.push({ n: w.n, type: 'science', source: sourceKey(w.source), text: `Passes ${w.name}${w.note ? ` – ${w.note}` : ''}` })
       continue
@@ -469,8 +580,9 @@ export function explainRoute(grid, layers, nodes, cum, total, waypoints, direct,
     const dClimb = chord.climbKm - real.climbKm
     const extraKm = +(real.km - chord.km).toFixed(1)
     const why = (type, value, text) => reasons.push({ n: w.n, type, source: 'MOLA', value, extraKm, text })
-    if (chord.keepHits > 0 && real.keepHits === 0) {
-      const code = chord.keepCode
+    const globalKeep = w.n === biggestN && direct.keepHits > 0 && actual.keepHits === 0
+    if ((chord.keepHits > 0 || globalKeep) && real.keepHits === 0) {
+      const code = chord.keepCode || direct.keepCode
       const lim = code === 2 ? `over ${limits.steepDeg}°` : code === 3 ? `over ${limits.lowKm} km below surroundings` : `over ${limits.bumpDeg}° local relief`
       why('keep-out', code, `Keeps out of a no-go zone: ${KEEP_CODES[code]} (${lim})`)
     } else if (dDepth >= 0.3) {
@@ -499,12 +611,40 @@ function packHazard(grid, rough, depth, bump, keep) {
   return { bounds: grid.bounds, lonMid: grid.lonMid, gw: grid.gw, gh: grid.gh, slope, low, bump: bumpy, keep }
 }
 
+// Last few trips, per terrain source: grid, ruggedness, low ground and bumpiness are the same for every mode.
+const TRIPS = new WeakMap()
+async function getTrip(start, end, prepareTerrain) {
+  let byKey = TRIPS.get(prepareTerrain)
+  if (!byKey) TRIPS.set(prepareTerrain, (byKey = new Map()))
+  const key = `${start.lat},${start.lon}>${end.lat},${end.lon}`
+  if (!byKey.has(key)) {
+    const build = (async () => {
+      const spec = gridSpec(start, end)
+      const t0 = Date.now()
+      const terrain = await prepareTerrain({ bounds: spec.bounds, cellKm: spec.cellKm, gw: spec.gw, gh: spec.gh })
+      const t1 = Date.now()
+      const grid = buildGrid(spec, terrain.heightAt)
+      const rough = ruggedness(grid)
+      // the comparison window scales with the trip so both small pits and big basins register
+      const lowR = clamp(0.12 * haversineKm(start, end), 6, 40)
+      const depth = lowGround(grid, lowR)
+      const rise = lowGround(grid, lowR, 'high') // how far a cell stands above its surroundings: crater rims, ridges, mounds
+      const bump = bumpiness(grid)
+      if (typeof console !== 'undefined') console.info(`[RedMap] terrain ready: NASA tiles ${t1 - t0} ms, grid and hazard layers ${Date.now() - t1} ms (${spec.gw}x${spec.gh} cells)`)
+      return { spec, terrain, grid, rough, depth, rise, bump }
+    })()
+    byKey.set(key, build)
+    build.catch(() => byKey.delete(key)) // do not remember failures
+    if (byKey.size > 4) byKey.delete(byKey.keys().next().value)
+  }
+  return byKey.get(key)
+}
+
 export async function planRealRoute(start, end, settings, { prepareTerrain, pois = [] }) {
   if (!start || !end || start.id === end.id) return null
 
-  const spec = gridSpec(start, end)
-  const terrain = await prepareTerrain({ bounds: spec.bounds, cellKm: spec.cellKm, gw: spec.gw, gh: spec.gh })
-  const grid = buildGrid(spec, terrain.heightAt)
+  // the terrain and the layers computed from it do not depend on the mode, so they are built once per trip
+  const { spec, terrain, grid, rough, depth, rise, bump } = await getTrip(start, end, prepareTerrain)
 
   const a = toCell(grid, start.lat, start.lon)
   const b = toCell(grid, end.lat, end.lon)
@@ -514,25 +654,28 @@ export async function planRealRoute(start, end, settings, { prepareTerrain, pois
     throw new RouteError('too_close', 'Start and destination are closer than the terrain resolution.')
   }
 
-  const cfg = ROUTE_MODES[settings.mode] ?? ROUTE_MODES.fastest
+  const cfg = typeof settings.blend === 'number' ? blendMode(settings.blend, settings.blendFrom ?? (settings.mode === 'scientific' ? 'scientific' : 'fastest')) : (ROUTE_MODES[settings.mode] ?? ROUTE_MODES.fastest)
   const poiCells = pois.map((p) => ({ ...p, ...toCell(grid, p.lat, p.lon) })).filter((p) => inGrid(grid, p))
 
   // Per-cell cost multiplier: rugged ground costs more (>1), cells near science sites cost less (<1)
   const cellMult = new Float32Array(grid.gw * grid.gh).fill(1)
-  const rough = ruggedness(grid)
   if (cfg.roughWeight) {
     for (let i = 0; i < cellMult.length; i++) cellMult[i] *= 1 + cfg.roughWeight * (rough[i] / 10) ** 2
   }
   // Low ground (crater floors, pits): costly to enter and leave, collects dust and cold air, poor radio line of sight.
   // The comparison window scales with the trip so both small pits and big basins register.
   const lowW = settings.avoidLows === false ? 0 : (cfg.lowWeight ?? 0)
-  const lowRadiusKm = clamp(0.12 * haversineKm(start, end), 6, 40)
-  const depth = lowGround(grid, lowRadiusKm)
   if (lowW) {
     for (let i = 0; i < cellMult.length; i++) cellMult[i] *= 1 + (lowW * Math.min(depth[i], 1.5)) / 0.3
   }
+  // Crater rims and ridge crests: steep ground that also stands well above its surroundings. Crossing one is slow and
+  // risky, so cost it, and prefer a gap or a way round.
+  if (cfg.rimWeight) {
+    for (let i = 0; i < cellMult.length; i++) {
+      if (rise[i] >= RIM_RISE_KM && rough[i] >= RIM_SLOPE_DEG) cellMult[i] *= 1 + cfg.rimWeight * (Math.min(rise[i], 1.5) / 0.6) ** 2
+    }
+  }
   // Bumpy ground at several scales (pits, mounds, broken terrain) that slope between neighbours misses
-  const bump = bumpiness(grid)
   if (cfg.bumpWeight) {
     for (let i = 0; i < cellMult.length; i++) cellMult[i] *= 1 + cfg.bumpWeight * (bump[i] / 5) ** 2
   }
@@ -553,7 +696,7 @@ export async function planRealRoute(start, end, settings, { prepareTerrain, pois
   }
 
   const slopeWeight = cfg.slopeWeight * (settings.avoidRough ? 1.5 : 1)
-  const costFor = (maxSlope) => ({ maxSlope, slopeWeight, bonus: cellMult, climb: cfg.climbKmPerKm ?? 0 })
+  const costFor = (maxSlope) => ({ maxSlope, slopeWeight, bonus: cellMult, climb: cfg.climbKmPerKm ?? 0, crossWeight: cfg.crossWeight ?? 0 })
   const cellOf = (p) => ({ x: Math.round(p.x), y: Math.round(p.y) })
   const waypoints = cfg.maxDetour && settings.showScience !== false ? pickWaypoints(start, end, poiCells, cfg.maxDetour) : []
 
@@ -575,18 +718,25 @@ export async function planRealRoute(start, end, settings, { prepareTerrain, pois
   // For each limit: first respecting the no-go zones, then, only if no such route exists, crossing them.
   let nodes = null
   let respectedKeepOut = false
+  let usedCost = null
   for (const limit of [Math.min(settings.maxSlopeDeg, cfg.maxSlope ?? 90), settings.maxSlopeDeg]) {
     for (const strict of keepOn ? [true, false] : [false]) {
       const cost = { ...costFor(limit), bonus: strict ? cellMultKeep : cellMult, blocked: strict ? keepEff : null }
       if (waypoints.length) nodes = routeThrough(grid, [sCell, ...waypoints.map(cellOf), gCell], cost, minMult)
       if (!nodes) nodes = routeThrough(grid, [sCell, gCell], cost, minMult)
-      if (nodes) { respectedKeepOut = strict; break }
+      if (nodes) { respectedKeepOut = strict; usedCost = cost; break }
     }
     if (nodes) break
   }
   if (!nodes) {
     throw new RouteError('blocked', `No route found within your ${settings.maxSlopeDeg}° slope limit. Raise the limit or pick another mode.`)
   }
+
+  // round the corners where that is still allowed, so the line looks like a real track
+  const pins = waypoints.map(cellOf)
+  nodes = relaxPath(grid, subdividePath(nodes), usedCost, pins)
+  nodes = shortcutPath(grid, nodes, usedCost, pins)
+  nodes = smoothPath(grid, nodes, usedCost, 2, pins)
 
   // ---- measure the straightened path ----
   nodes[0] = { fx: a.x, fy: a.y }
@@ -612,10 +762,11 @@ export async function planRealRoute(start, end, settings, { prepareTerrain, pois
     const elevKm = bilinear(grid, fx, fy)
     const slope = slopeAt(grid, fx, fy)
     const depthKm = bilinear(grid, fx, fy, depth)
+    const riseKm = bilinear(grid, fx, fy, rise)
     points.push({
       km: +((i / N) * distanceKm).toFixed(1), lat, lon,
       elevKm: +elevKm.toFixed(3), slopeDeg: +slope.toFixed(1), depthKm: +depthKm.toFixed(2),
-      terrain: classify(slope, depthKm), tempC: estimateTempC(lat, elevKm),
+      terrain: classify(slope, depthKm, riseKm), tempC: estimateTempC(lat, elevKm),
     })
   }
 
@@ -637,9 +788,7 @@ export async function planRealRoute(start, end, settings, { prepareTerrain, pois
   }
 
   const keptStops = stops.slice(0, 8)
-  const requestedLeg = clamp(settings.maxLegKm ?? DEFAULT_MAX_LEG_KM, 5, 100)
-  const effectiveLeg = Math.max(requestedLeg, distanceKm / 12) // very long routes: at most ~12 checkpoints
-  const navPoints = buildWaypoints(ll, cum, total, distanceKm, keptStops, { maxLegKm: effectiveLeg })
+  const navPoints = buildWaypoints(ll, cum, total, distanceKm, keptStops)
   for (const w of navPoints) {
     if (w.kind === 'stop') continue
     const c = toCell(grid, w.lat, w.lon)
@@ -648,7 +797,7 @@ export async function planRealRoute(start, end, settings, { prepareTerrain, pois
 
   // legs between consecutive waypoints: length, steepest ground, and whether the crew could climb back out
   const retraceLimit = Math.min(RETRACE_MAX_SLOPE, settings.maxSlopeDeg)
-  const label = (w) => (w.kind === 'stop' ? w.name : w.kind === 'checkpoint' ? `Checkpoint ${w.n}` : `Waypoint ${w.n}`)
+  const label = (w) => (w.kind === 'stop' ? w.name : `Waypoint ${w.n}`)
   const marks = [{ km: 0, label: start.name }, ...navPoints.map((w) => ({ km: w.km, label: label(w) })), { km: distanceKm, label: end.name }]
   const legs = []
   for (let i = 0; i < marks.length - 1; i++) {
@@ -673,7 +822,6 @@ export async function planRealRoute(start, end, settings, { prepareTerrain, pois
       crossed: actual.keepHits > 0,
       crossedKind: actual.keepCode ? KEEP_CODES[actual.keepCode] : null,
     },
-    legLimit: { requestedKm: requestedLeg, effectiveKm: +effectiveLeg.toFixed(1) },
   }
 
   return finalizeRoute({

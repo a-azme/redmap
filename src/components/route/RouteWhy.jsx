@@ -1,10 +1,10 @@
 import SourceChip from './SourceChip';
 import { HAZARD_LEGENDS } from '../../lib/hazardImage';
 
-const HAZARDS = [['off', 'Off'], ['slope', 'Slope risk'], ['low', 'Low ground'], ['bump', 'Bumpiness'], ['keep', 'No-go zones']];
+const HAZARDS = [['off', 'Off'], ['slope', 'Slope risk'], ['low', 'Low ground'], ['keep', 'No-go zones']];
 
 /** Explains the route: what a straight line would have met, why each bend exists, how the mode weighs terrain. */
-export default function RouteWhy({ route, hazard, onHazard }) {
+export default function RouteWhy({ route, hazard, onHazard, plan }) {
   const why = route?.why;
   if (!why) return null;
   const { direct, actual, reasons, cost } = why;
@@ -15,6 +15,10 @@ export default function RouteWhy({ route, hazard, onHazard }) {
     ['Distance', `${direct.km.toFixed(0)} km`, `${route.distanceKm} km`],
   ];
   const legend = HAZARD_LEGENDS[hazard];
+  const parts = route.riskParts?.filter((p) => p.points > 0.4) ?? [];
+  const maxPart = Math.max(...parts.map((p) => p.points), 1);
+  const weak = (route.legs ?? []).filter((l) => l.level !== 'low').sort((a, b) => b.risk - a.risk).slice(0, 4);
+  const schedule = (plan?.warnings ?? []).filter((w) => /dust|sunset|dark|night|light/i.test(`${w.title} ${w.detail}`));
 
   return (
     <section className="rm-card rm-why">
@@ -28,6 +32,39 @@ export default function RouteWhy({ route, hazard, onHazard }) {
           ))}
         </tbody>
       </table>
+      <h4>Risk <span className={`rm-risk rm-risk--${route.riskLabel.toLowerCase()}`}>{route.riskLabel} · {route.riskIsMinimum ? '≥ ' : ''}{route.risk}/100</span></h4>
+      {parts.length === 0 ? (
+        <p className="rm-muted">Nothing is pushing the score up on this route.</p>
+      ) : (
+        <ul className="rm-riskbars">
+          {parts.map((p) => (
+            <li key={p.key}>
+              <div><strong>{p.label}</strong><small>{p.detail}</small></div>
+              <span className="rm-riskbar"><i style={{ width: `${(p.points / maxPart) * 100}%` }} /></span>
+              <b>+{Math.round(p.points)}</b>
+            </li>
+          ))}
+        </ul>
+      )}
+      {parts[0] && <p className="rm-muted"><strong>Biggest lever:</strong> {parts[0].tip}</p>}
+      {weak.length > 0 && (
+        <>
+          <h4>Weakest legs</h4>
+          <ul className="rm-legrisk">
+            {weak.map((l) => (
+              <li key={`${l.fromKm}-${l.toKm}`}>
+                <span className={`rm-dot rm-dot--${l.level}`} />
+                {l.from} → {l.to} <small>km {l.fromKm}–{l.toKm} · up to {l.maxSlopeDeg.toFixed(0)}°{l.retraceable ? '' : ' · hard to retrace'}</small>
+              </li>
+            ))}
+          </ul>
+          <p className="rm-muted">Scout these on HiRISE or CTX imagery before committing, and keep a fall-back plan for the crew.</p>
+        </>
+      )}
+      {schedule.length > 0 && (
+        <p className="rm-muted"><strong>Schedule:</strong> {schedule.map((w) => w.title).join(', ')} (see the EVA timeline).</p>
+      )}
+
       <p className="rm-muted">
         {why.extraKm > 0.5
           ? `The detour adds ${why.extraKm} km (${((why.extraKm / Math.max(1, direct.km)) * 100).toFixed(1)}%) to avoid the hazards the straight line meets.`
@@ -56,12 +93,6 @@ export default function RouteWhy({ route, hazard, onHazard }) {
             : 'This route stays out of all of them.'}
         </p>
       )}
-      {why.legLimit && (
-        <p className="rm-muted">
-          Checkpoints every {why.legLimit.effectiveKm} km or less{why.legLimit.effectiveKm > why.legLimit.requestedKm + 0.5 ? ` (your ${why.legLimit.requestedKm} km limit would need too many)` : ''}, so the crew is never far from a place to stop and turn back.
-        </p>
-      )}
-
       <p className="rm-muted">
         <strong>{route.settings.mode}</strong> mode: hard limit {cost.maxSlope}° · slope penalty ×{cost.slopeWeight} · rugged ground ×{cost.roughWeight ?? 0} · low spots {cost.lowGroundOn ? `×${cost.lowWeight}` : 'ignored'} · each 1 km of climbing costs {cost.climbKmPerKm} km.
       </p>
