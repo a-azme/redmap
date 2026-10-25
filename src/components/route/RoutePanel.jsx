@@ -106,7 +106,7 @@ export default function RoutePanel({ onRouteChange, onBack, initialStartId = 'ni
       <button type="button" className="rm-plan" onClick={handlePlan} disabled={busy}>
         {busy ? 'Loading NASA terrain…' : '🚀 Plan Route'}
       </button>
-      {refining && <p className="rm-muted">Comparing the other modes…</p>}
+      {refining && <p className="rm-muted">Comparing modes and refining the route…</p>}
     </aside>
   );
 }
