@@ -104,6 +104,8 @@ export function finalizeRoute({ start, end, settings, points, distanceKm, stops 
 
   if (dataSource && !dataSource.real) {
     warnings.push({ severity: 'info', title: 'Simulated terrain', detail: 'NASA elevation data could not be loaded, so slopes and terrain on this route are illustrative only.', fromKm: 0, toKm: distanceKm })
+  } else if (dataSource?.hops > 1) {
+    warnings.push({ severity: 'info', title: 'Long route planned in hops', detail: `Planned in ${dataSource.hops} hops of about ${Math.round(distanceKm / dataSource.hops)} km, each on a ~${dataSource.resolutionKm.toFixed(0)} km grid, so craters and rims larger than ~${Math.round(dataSource.resolutionKm * 3)} km are avoided. Smaller ones, boulders and loose sand are not resolved: scout each leg on HiRISE or CTX imagery before driving it.`, fromKm: 0, toKm: distanceKm })
   } else if (dataSource?.resolutionKm > 5 || distanceKm > LONG_TRIP_KM) {
     warnings.push({ severity: 'caution', title: 'Overview route only', detail: `${distanceKm > LONG_TRIP_KM ? `At ${Math.round(distanceKm).toLocaleString()} km this is too long to plan reliably. ` : ''}Terrain is sampled every ~${(dataSource.resolutionKm ?? 0).toFixed(0)} km on a trip this long, so craters, rims and ridges smaller than ~${Math.round((dataSource.resolutionKm ?? 0) * 3)} km cannot be seen and the line may cross them. The risk score is a minimum, not an estimate. Use this to compare places, then plan shorter hops (under ~${SAFE_TRIP_KM.toLocaleString()} km) for a route you would drive.`, fromKm: 0, toKm: distanceKm })
   } else if (dataSource?.resolutionKm > 1.5) {
@@ -140,7 +142,7 @@ export function finalizeRoute({ start, end, settings, points, distanceKm, stops 
 
   // how much the numbers can be trusted: the grid decides what hazards the planner could see
   const res = dataSource?.resolutionKm ?? 0
-  const reliability = !dataSource?.real ? 'simulated' : res > 5 || distanceKm > LONG_TRIP_KM ? 'overview' : res > 1.5 ? 'coarse' : 'detailed'
+  const reliability = !dataSource?.real ? 'simulated' : dataSource.hops > 1 ? 'hopped' : res > 5 || distanceKm > LONG_TRIP_KM ? 'overview' : res > 1.5 ? 'coarse' : 'detailed'
 
   return {
     start, end, settings, mode: settings.mode, distanceKm, sols, reliability, riskIsMinimum: reliability === 'overview',

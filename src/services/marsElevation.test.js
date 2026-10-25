@@ -137,19 +137,29 @@ test('a plain-data snapshot of the terrain gives the same heights and the same r
   assert.deepEqual(back.warnings.map((w) => w.title), viaSnap.warnings.map((w) => w.title))
 })
 
-test('the planning worker protocol: snapshot in, route out, and a clear error when terrain is missing', async () => {
+test('the planning worker protocol: it asks for terrain, plans on it, and returns a route that can be sent back', async () => {
   const t = createMarsTerrain({ loadTile: fakeServerStd().loadTile })
   const nili = { id: 'nili', name: 'Nili', lat: 21.0, lon: 74.5 }
   const jez = { id: 'jez', name: 'Jezero', lat: 18.435, lon: 77.527 }
-  const terrain = await t.prepareTerrain({ bounds: { lonMin: 72, lonMax: 80, latMin: 16, latMax: 23 }, cellKm: 1 })
-  const handle = createWorkerHandler([])
-  const msg = (id, extra = {}) => structuredClone({ id, start: nili, end: jez, settings: { mode: 'fastest', maxSlopeDeg: 15, avoidRough: true, showScience: false, evaHoursPerSol: 6 }, tripKey: 'k', ...extra })
-  const first = await handle(msg(1, { snapshot: terrain.snapshot, source: terrain.source }))
+  const asked = []
+  const requestTerrain = async (spec) => {
+    asked.push(spec)
+    const terrain = await t.prepareTerrain(spec)
+    return structuredClone({ snapshot: terrain.snapshot, source: terrain.source }) // what postMessage does
+  }
+  const handle = createWorkerHandler({ pois: [], requestTerrain })
+  const msg = (id, extra = {}) => structuredClone({ id, start: nili, end: jez, settings: { mode: 'fastest', maxSlopeDeg: 15, avoidRough: true, showScience: false, evaHoursPerSol: 6, ...extra } })
+  const first = await handle(msg(1))
   assert.equal(first.id, 1)
   assert.ok(first.route && first.route.distanceKm > 100, JSON.stringify(first.error))
   structuredClone(first) // must be sendable back with postMessage
-  const second = await handle(msg(2)) // same trip, no snapshot needed any more
+  assert.equal(asked.length, 1)
+  const second = await handle(msg(2, { mode: 'safest' })) // same trip, another mode: the terrain is not asked for again
   assert.ok(second.route)
-  const lost = await handle(msg(3, { tripKey: 'other' }))
-  assert.equal(lost.error.code, 'need_terrain')
+  assert.equal(asked.length, 1)
+  const hops = await handle(msg(3, { hops: true })) // a short trip is not split into hops
+  assert.ok(hops.route && !hops.route.dataSource.hops)
+  const broken = createWorkerHandler({ pois: [], requestTerrain: async () => { throw new Error('tiles unavailable') } })
+  const lost = await broken(msg(4))
+  assert.match(lost.error.message, /tiles unavailable/)
 })

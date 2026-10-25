@@ -635,16 +635,40 @@ async function getTrip(start, end, prepareTerrain) {
     })()
     byKey.set(key, build)
     build.catch(() => byKey.delete(key)) // do not remember failures
-    if (byKey.size > 4) byKey.delete(byKey.keys().next().value)
+    if (byKey.size > 24) byKey.delete(byKey.keys().next().value)
   }
   return byKey.get(key)
 }
 
-export async function planRealRoute(start, end, settings, { prepareTerrain, pois = [] }) {
+export async function planRealRoute(start, end, settings, { prepareTerrain, pois = [], parts = false, snapEnd = false, snapKm = 30 }) {
   if (!start || !end || start.id === end.id) return null
 
   // the terrain and the layers computed from it do not depend on the mode, so they are built once per trip
   const { spec, terrain, grid, rough, depth, rise, bump } = await getTrip(start, end, prepareTerrain)
+
+  const cfg = typeof settings.blend === 'number' ? blendMode(settings.blend, settings.blendFrom ?? (settings.mode === 'scientific' ? 'scientific' : 'fastest')) : (ROUTE_MODES[settings.mode] ?? ROUTE_MODES.fastest)
+
+  // Hop checkpoints (see planRealRouteHopped) may sit on a crater rim by bad luck: move the end to the calmest ground nearby.
+  if (snapEnd) {
+    const lim = cfg.keepOut ?? { steepDeg: 20, lowKm: 1.6, bumpDeg: 12 }
+    const c = toCell(grid, end.lat, end.lon)
+    const rCells = Math.max(1, Math.round(snapKm / spec.cellKm))
+    let best = null
+    for (let y = Math.max(0, Math.round(c.y) - rCells); y <= Math.min(grid.gh - 1, Math.round(c.y) + rCells); y++) {
+      for (let x = Math.max(0, Math.round(c.x) - rCells); x <= Math.min(grid.gw - 1, Math.round(c.x) + rCells); x++) {
+        const d = Math.hypot((x - c.x) * grid.dxRow[y], (y - c.y) * grid.dy)
+        if (d > snapKm) continue
+        const i = y * grid.gw + x
+        const rim = rise[i] >= RIM_RISE_KM && rough[i] >= RIM_SLOPE_DEG ? 1.5 : 0
+        const score = rough[i] / lim.steepDeg + depth[i] / lim.lowKm + bump[i] / lim.bumpDeg + rim + (0.3 * d) / snapKm
+        if (!best || score < best.score) best = { score, x, y }
+      }
+    }
+    if (best) {
+      const ll = cellToLatLon(grid, best.x, best.y)
+      end = { ...end, lat: ll.lat, lon: to360(ll.lon) }
+    }
+  }
 
   const a = toCell(grid, start.lat, start.lon)
   const b = toCell(grid, end.lat, end.lon)
@@ -654,7 +678,6 @@ export async function planRealRoute(start, end, settings, { prepareTerrain, pois
     throw new RouteError('too_close', 'Start and destination are closer than the terrain resolution.')
   }
 
-  const cfg = typeof settings.blend === 'number' ? blendMode(settings.blend, settings.blendFrom ?? (settings.mode === 'scientific' ? 'scientific' : 'fastest')) : (ROUTE_MODES[settings.mode] ?? ROUTE_MODES.fastest)
   const poiCells = pois.map((p) => ({ ...p, ...toCell(grid, p.lat, p.lon) })).filter((p) => inGrid(grid, p))
 
   // Per-cell cost multiplier: rugged ground costs more (>1), cells near science sites cost less (<1)
@@ -795,17 +818,7 @@ export async function planRealRoute(start, end, settings, { prepareTerrain, pois
     w.elevKm = +bilinear(grid, c.x, c.y).toFixed(2)
   }
 
-  // legs between consecutive waypoints: length, steepest ground, and whether the crew could climb back out
-  const retraceLimit = Math.min(RETRACE_MAX_SLOPE, settings.maxSlopeDeg)
-  const label = (w) => (w.kind === 'stop' ? w.name : `Waypoint ${w.n}`)
-  const marks = [{ km: 0, label: start.name }, ...navPoints.map((w) => ({ km: w.km, label: label(w) })), { km: distanceKm, label: end.name }]
-  const legs = []
-  for (let i = 0; i < marks.length - 1; i++) {
-    const a0 = marks[i].km, b0 = marks[i + 1].km
-    const inside = points.filter((p) => p.km >= a0 - 1e-6 && p.km <= b0 + 1e-6)
-    const maxSlopeDeg = inside.length ? Math.max(...inside.map((p) => p.slopeDeg)) : 0
-    legs.push({ from: marks[i].label, to: marks[i + 1].label, fromKm: a0, toKm: b0, km: b0 - a0, maxSlopeDeg, retraceable: maxSlopeDeg <= retraceLimit })
-  }
+  const legs = legsFor(start, end, points, navPoints, distanceKm, settings)
 
   const layers = { depth, bump, keep: keepOn ? keepEff : null, keepRaw: keep.raw }
   const direct = measureLine(grid, layers, [nodes[0], nodes[nodes.length - 1]])
@@ -824,9 +837,143 @@ export async function planRealRoute(start, end, settings, { prepareTerrain, pois
     },
   }
 
-  return finalizeRoute({
+  const result = {
     start, end, settings, points, distanceKm, stops: keptStops, waypoints: navPoints, why, legs,
     hazard: packHazard(grid, rough, depth, bump, keep.raw),
     dataSource: { ...terrain.source, resolutionKm: +spec.cellKm.toFixed(2) },
+  }
+  return parts ? result : finalizeRoute(result)
+}
+
+/** Legs between consecutive waypoints: length, steepest ground, and whether the crew could climb back out. */
+export function legsFor(start, end, points, navPoints, distanceKm, settings) {
+  const retraceLimit = Math.min(RETRACE_MAX_SLOPE, settings.maxSlopeDeg)
+  const label = (w) => (w.kind === 'stop' ? w.name : `Waypoint ${w.n}`)
+  const marks = [{ km: 0, label: start.name }, ...navPoints.map((w) => ({ km: w.km, label: label(w) })), { km: distanceKm, label: end.name }]
+  const legs = []
+  for (let i = 0; i < marks.length - 1; i++) {
+    const a0 = marks[i].km, b0 = marks[i + 1].km
+    const inside = points.filter((p) => p.km >= a0 - 1e-6 && p.km <= b0 + 1e-6)
+    const maxSlopeDeg = inside.length ? Math.max(...inside.map((p) => p.slopeDeg)) : 0
+    legs.push({ from: marks[i].label, to: marks[i + 1].label, fromKm: a0, toKm: b0, km: b0 - a0, maxSlopeDeg, retraceable: maxSlopeDeg <= retraceLimit })
+  }
+  return legs
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Long trips: one grid over thousands of km has cells tens of km wide, so craters and rims are invisible to it.
+// Plan the whole trip once for an overview, then re-plan it in hops of a few hundred km, each on its own fine grid,
+// starting each hop where the last one ended, and join the hops into one route.
+// ---------------------------------------------------------------------------------------------------------------
+export const HOP_MIN_TRIP_KM = 2500 // trips shorter than this are planned on one grid
+export const HOP_KM = 800
+
+const mergeMeasure = (list) => ({
+  maxSlopeDeg: Math.max(...list.map((m) => m.maxSlopeDeg)),
+  maxDepthKm: Math.max(...list.map((m) => m.maxDepthKm)),
+  maxBumpDeg: Math.max(...list.map((m) => m.maxBumpDeg)),
+  climbKm: +list.reduce((n, m) => n + m.climbKm, 0).toFixed(2),
+  minElevKm: Math.min(...list.map((m) => m.minElevKm)),
+  km: +list.reduce((n, m) => n + m.km, 0).toFixed(1),
+  keepHits: list.reduce((n, m) => n + m.keepHits, 0),
+  keepCode: list.find((m) => m.keepCode)?.keepCode ?? 0,
+})
+
+/** Joins the per-hop results (planRealRoute with parts: true) into one route. Exported for tests. */
+export function mergeHops(start, end, settings, hops, hazard) {
+  const offsets = []
+  let total = 0
+  for (const h of hops) { offsets.push(total); total += h.distanceKm }
+
+  // points: every hop starts where the last ended, so drop the duplicate; keep the steepest point of each stride when thinning
+  let points = []
+  hops.forEach((h, i) => {
+    h.points.forEach((p, j) => {
+      if (i > 0 && j === 0) return
+      points.push({ ...p, km: +(p.km + offsets[i]).toFixed(1) })
+    })
   })
+  const maxPoints = 240
+  if (points.length > maxPoints) {
+    const k = Math.ceil(points.length / maxPoints)
+    const thin = [points[0]]
+    for (let i = 1; i < points.length - 1; i += k) {
+      const win = points.slice(i, Math.min(points.length - 1, i + k))
+      thin.push(win.reduce((m, p) => (p.slopeDeg > m.slopeDeg ? p : m), win[0]))
+    }
+    thin.push(points[points.length - 1])
+    points = thin
+  }
+  points[points.length - 1].km = total
+
+  // science stops (the same site can fall in two hops)
+  const seen = new Set()
+  const stops = hops.flatMap((h, i) => h.stops.map((s) => ({ ...s, km: s.km + offsets[i] })))
+    .filter((s) => (seen.has(s.id) ? false : seen.add(s.id)))
+    .sort((a, b) => a.km - b.km)
+    .slice(0, 10)
+
+  // waypoints: every science stop, plus the sharpest turns over the whole route (hop boundaries are not waypoints)
+  const reasonOf = (h, w) => h.why.reasons.find((r) => r.n === w.n)
+  let wps = hops.flatMap((h, i) => h.waypoints.map((w) => ({ w: { ...w, km: w.km + offsets[i] }, reason: reasonOf(h, w) })))
+  const stopIds = new Set(stops.map((s) => s.id))
+  wps = wps.filter(({ w }) => (w.kind === 'stop' ? stopIds.has(w.id) : true))
+  const turns = wps.filter(({ w }) => w.kind === 'turn').sort((a, b) => b.w.turnDeg - a.w.turnDeg).slice(0, 10)
+  const keep = new Set([...wps.filter(({ w }) => w.kind === 'stop'), ...turns])
+  const chosen = wps.filter((x) => keep.has(x)).sort((a, b) => a.w.km - b.w.km)
+  const waypoints = chosen.map(({ w }, i) => ({ ...w, n: i + 1, name: w.kind === 'stop' ? w.name : `Waypoint ${i + 1}` }))
+  const reasons = chosen.map(({ reason }, i) => (reason ? { ...reason, n: i + 1 } : null)).filter(Boolean)
+
+  const legs = legsFor(start, end, points, waypoints, total, settings)
+  const k0 = hops[0].why.keepOut
+  const direct = mergeMeasure(hops.map((h) => h.why.direct))
+  const actual = mergeMeasure(hops.map((h) => h.why.actual))
+  const why = {
+    reasons, direct, actual,
+    extraKm: +(total - haversineKm(start, end)).toFixed(1),
+    cost: hops[0].why.cost,
+    keepOut: {
+      on: k0.on,
+      limits: k0.limits,
+      areaPct: +(hops.reduce((n, h) => n + h.why.keepOut.areaPct, 0) / hops.length).toFixed(1),
+      respected: hops.every((h) => h.why.keepOut.respected),
+      crossed: hops.some((h) => h.why.keepOut.crossed),
+      crossedKind: hops.find((h) => h.why.keepOut.crossed)?.why.keepOut.crossedKind ?? null,
+    },
+  }
+  return {
+    start, end, settings, points, distanceKm: total, stops, waypoints, why, legs, hazard,
+    dataSource: {
+      ...hops[0].dataSource,
+      resolutionKm: +Math.max(...hops.map((h) => h.dataSource.resolutionKm)).toFixed(2),
+      hops: hops.length,
+    },
+  }
+}
+
+export async function planRealRouteHopped(start, end, settings, opts = {}) {
+  const coarse = await planRealRoute(start, end, settings, { ...opts, parts: false })
+  if (!coarse || coarse.distanceKm <= HOP_MIN_TRIP_KM || coarse.dataSource?.real === false) return coarse
+
+  const n = Math.ceil(coarse.distanceKm / HOP_KM)
+  const at = (km) => coarse.points.reduce((m, p) => (Math.abs(p.km - km) < Math.abs(m.km - km) ? p : m))
+  try {
+    const hops = []
+    let from = start
+    for (let i = 0; i < n; i++) {
+      const last = i === n - 1
+      const target = last ? end : { id: `hop-${i}`, name: `Checkpoint ${i + 1}`, lat: at(((i + 1) * coarse.distanceKm) / n).lat, lon: at(((i + 1) * coarse.distanceKm) / n).lon }
+      const part = await planRealRoute(from, target, settings, { ...opts, parts: true, snapEnd: !last })
+      hops.push(part)
+      if (!last) {
+        const e = part.points[part.points.length - 1]
+        from = { id: `hop-${i}`, name: `Checkpoint ${i + 1}`, lat: e.lat, lon: e.lon }
+      }
+    }
+    return finalizeRoute(mergeHops(start, end, settings, hops, coarse.hazard))
+  } catch (e) {
+    // a hop failed (no way through its slope limit, say): keep the overview route rather than nothing
+    console.warn('[RedMap] hop planning failed, keeping the overview route:', e.message)
+    return coarse
+  }
 }
