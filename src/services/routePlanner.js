@@ -6,7 +6,7 @@
 // Genuine planning outcomes (no passable route, points too close) are thrown, not hidden.
 
 import sciencePOIs from '../data/sciencePOIs.json'
-import { planRealRoute, RouteError } from '../lib/realRoute.js'
+import { planRealRoute, gridSpec, RouteError } from '../lib/realRoute.js'
 import { marsTerrain } from './marsElevation.js'
 import { planRoute as planSimulated } from '../components/route/routeUtils'
 import { MODES } from '../lib/routeAnalysis.js'
@@ -14,11 +14,94 @@ import { searchBlend, goalFor, needsRefining } from '../lib/balanced.js'
 
 const PLANNING_ERRORS = new Set(['blocked', 'too_close'])
 
+// ---- run the planner in a Web Worker when the browser has one, so the page never freezes while it works ----
+let worker = null
+let workerBroken = false
+let nextId = 1
+const waiting = new Map()
+const WORKER_TIMEOUT_MS = 30_000
+const known = new Set() // trips whose terrain the worker already holds
+
+function getWorker() {
+  if (workerBroken || typeof Worker === 'undefined') return null
+  if (!worker) {
+    try {
+      worker = new Worker(new URL('../workers/routeWorker.js', import.meta.url), { type: 'module' })
+      console.info('[RedMap] route planning runs in a Web Worker')
+      worker.onmessage = ({ data }) => {
+        const w = waiting.get(data.id)
+        if (!w) return
+        waiting.delete(data.id)
+        if (data.error) w.reject(Object.assign(new RouteError(data.error.code ?? 'failed', data.error.message), { code: data.error.code }))
+        else w.resolve(data.route)
+      }
+      worker.onmessageerror = () => { console.warn('[RedMap] planning worker sent data that could not be read') }
+      worker.onerror = (e) => {
+        console.warn('[RedMap] planning worker failed, planning on the main thread instead:', e.message)
+        workerBroken = true
+        worker = null
+        for (const w of waiting.values()) w.reject(new Error('worker failed'))
+        waiting.clear()
+      }
+    } catch { workerBroken = true; worker = null }
+  }
+  return worker
+}
+
+const tripKeyOf = (start, end) => `${start.lat},${start.lon}>${end.lat},${end.lon}`
+
+async function planInWorker(w, start, end, settings, retry = true) {
+  const tripKey = tripKeyOf(start, end)
+  let extra = {}
+  if (!known.has(tripKey)) {
+    const spec = gridSpec(start, end)
+    const terrain = await terrainSource.prepareTerrain({ bounds: spec.bounds, cellKm: spec.cellKm, gw: spec.gw, gh: spec.gh })
+    extra = { snapshot: terrain.snapshot, source: terrain.source }
+  }
+  const id = nextId++
+  // if the worker never answers (it failed to start, say), give up on it after a while and plan on the main thread
+  const result = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      waiting.delete(id)
+      console.warn('[RedMap] planning worker did not answer in time, planning on the main thread instead')
+      workerBroken = true
+      try { worker?.terminate() } catch { /* already gone */ }
+      worker = null
+      reject(new Error('worker timeout'))
+    }, WORKER_TIMEOUT_MS)
+    waiting.set(id, { resolve: (v) => { clearTimeout(timer); resolve(v) }, reject: (e) => { clearTimeout(timer); reject(e) } })
+  })
+  w.postMessage({ id, start, end, settings, tripKey, ...extra })
+  try {
+    const route = await result
+    known.add(tripKey)
+    if (known.size > 4) known.delete(known.keys().next().value)
+    return route
+  } catch (e) {
+    if (e.code === 'need_terrain' && retry) { known.delete(tripKey); return planInWorker(w, start, end, settings, false) }
+    throw e
+  }
+}
+
+/** Lets tests swap the NASA tile source for fake tiles. */
+let terrainSource = marsTerrain
+export function useTerrainSource(t) { terrainSource = t ?? marsTerrain; known.clear() }
+
 export async function planRouteAsync(start, end, settings) {
   if (!start || !end || start.id === end.id) return null
   try {
+    const w = getWorker()
+    if (w) {
+      try {
+        return await planInWorker(w, start, end, settings)
+      } catch (e) {
+        if (e instanceof RouteError && e.code && e.code !== 'need_terrain') throw e // a real planning outcome
+        if (!workerBroken) throw e // terrain unavailable etc.: handled below like before
+        // the worker itself failed: plan on the main thread instead
+      }
+    }
     return await planRealRoute(start, end, settings, {
-      prepareTerrain: marsTerrain.prepareTerrain,
+      prepareTerrain: terrainSource.prepareTerrain,
       pois: sciencePOIs,
     })
   } catch (err) {

@@ -45,7 +45,7 @@ export default function RouteOverview({ route, plan = null, selectedStopIds = []
         </dl>
         {route.riskIsMinimum && (
           <p className="rm-overview__banner" role="note">
-            <strong>Overview only.</strong> {route.distanceKm.toLocaleString()} km is too long to plan reliably: the {src?.resolutionKm} km grid hides craters, rims and steep walls, so slope and risk are minimums. Pick closer sites or plan in hops under ~1,000 km.
+            <strong>Overview only.</strong> The {src?.resolutionKm} km grid hides craters and steep walls, so slope and risk are minimums. Plan hops under ~1,000 km.
           </p>
         )}
         {src && (

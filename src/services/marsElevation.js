@@ -141,6 +141,13 @@ function fitLine(xs, ys) {
   return { a, b, r2: syy ? 1 - sse / syy : 0, rmse: Math.sqrt(sse / n) }
 }
 
+/** Rebuilds a height function from the plain-data snapshot made by prepareTerrain (used inside the planning worker). */
+export function heightFromSnapshot(snap) {
+  const m = new Mosaic(snap.z, null)
+  m.tiles = new Map(snap.tiles)
+  return (lat, lon) => snap.a * m.gray(lat, lon) + snap.b
+}
+
 export function createMarsTerrain({ loadTile: rawLoadTile, anchors = ANCHORS, source = DEM_SOURCE } = {}) {
   // remember tiles (and in-flight requests) so planning several routes loads each tile only once
   const tileCache = new Map()
@@ -210,6 +217,8 @@ export function createMarsTerrain({ loadTile: rawLoadTile, anchors = ANCHORS, so
 
     return {
       heightAt: (lat, lon) => cal.a * mosaic.gray(lat, lon) + cal.b,
+      // plain data copy of what heightAt reads, so planning can run in a Web Worker (see terrainFromSnapshot)
+      snapshot: { z, a: cal.a, b: cal.b, tiles: [...mosaic.tiles].filter(([, t]) => t).map(([k, t]) => [k, { gray: t.gray, alpha: t.alpha }]) },
       source: {
         real: true,
         name: source.name,

@@ -1,8 +1,9 @@
 // Tests the NASA tile sampler against a fake tile server (no network needed).
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createMarsTerrain, ANCHORS } from './marsElevation.js'
+import { createMarsTerrain, heightFromSnapshot, ANCHORS } from './marsElevation.js'
 import { planRealRoute } from '../lib/realRoute.js'
+import { createWorkerHandler } from '../workers/routeWorkerCore.js'
 import { haversineKm } from '../lib/routeAnalysis.js'
 
 // Smooth fake planet: heights blend towards the nearest anchor's known height.
@@ -116,4 +117,39 @@ test('steps down to a shallower zoom when the server has fewer levels than expec
   seen.length = 0
   await t.prepareTerrain({ bounds: { lonMin: 80, lonMax: 84, latMin: 5, latMax: 9 }, cellKm: 0.8 })
   assert.ok(seen.every((z) => z <= 4), `asked for zoom ${Math.max(...seen)}`)
+})
+
+test('a plain-data snapshot of the terrain gives the same heights and the same route, and survives a worker hop', async () => {
+  const t = createMarsTerrain({ loadTile: fakeServerStd().loadTile })
+  const nili = { id: 'nili', name: 'Nili', lat: 21.0, lon: 74.5 }
+  const jez = { id: 'jez', name: 'Jezero', lat: 18.435, lon: 77.527 }
+  const spec = { bounds: { lonMin: 72, lonMax: 80, latMin: 16, latMax: 23 }, cellKm: 1 }
+  const terrain = await t.prepareTerrain(spec)
+  const snap = structuredClone(terrain.snapshot) // what postMessage does
+  const h = heightFromSnapshot(snap)
+  for (const [la, lo] of [[18.4, 77.5], [21, 74.5], [19.2, 76.1]]) assert.equal(h(la, lo), terrain.heightAt(la, lo))
+  const settings = { mode: 'safest', maxSlopeDeg: 15, avoidRough: true, showScience: false, evaHoursPerSol: 6 }
+  const direct = await planRealRoute(nili, jez, settings, { prepareTerrain: async () => terrain })
+  const viaSnap = await planRealRoute(nili, jez, settings, { prepareTerrain: async () => ({ heightAt: h, source: terrain.source }) })
+  assert.equal(viaSnap.distanceKm, direct.distanceKm)
+  const back = structuredClone(viaSnap) // the route has to cross the worker boundary too
+  assert.equal(back.points.length, viaSnap.points.length)
+  assert.deepEqual(back.warnings.map((w) => w.title), viaSnap.warnings.map((w) => w.title))
+})
+
+test('the planning worker protocol: snapshot in, route out, and a clear error when terrain is missing', async () => {
+  const t = createMarsTerrain({ loadTile: fakeServerStd().loadTile })
+  const nili = { id: 'nili', name: 'Nili', lat: 21.0, lon: 74.5 }
+  const jez = { id: 'jez', name: 'Jezero', lat: 18.435, lon: 77.527 }
+  const terrain = await t.prepareTerrain({ bounds: { lonMin: 72, lonMax: 80, latMin: 16, latMax: 23 }, cellKm: 1 })
+  const handle = createWorkerHandler([])
+  const msg = (id, extra = {}) => structuredClone({ id, start: nili, end: jez, settings: { mode: 'fastest', maxSlopeDeg: 15, avoidRough: true, showScience: false, evaHoursPerSol: 6 }, tripKey: 'k', ...extra })
+  const first = await handle(msg(1, { snapshot: terrain.snapshot, source: terrain.source }))
+  assert.equal(first.id, 1)
+  assert.ok(first.route && first.route.distanceKm > 100, JSON.stringify(first.error))
+  structuredClone(first) // must be sendable back with postMessage
+  const second = await handle(msg(2)) // same trip, no snapshot needed any more
+  assert.ok(second.route)
+  const lost = await handle(msg(3, { tripKey: 'other' }))
+  assert.equal(lost.error.code, 'need_terrain')
 })

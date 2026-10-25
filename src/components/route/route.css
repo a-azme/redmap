@@ -11,7 +11,7 @@
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 14px;
-  backdrop-filter: blur(10px);
+  user-select: none; /* dragging the map over a card should pan, not select text */
   font-family: system-ui, sans-serif;
   font-size: 14px;
 }
@@ -23,9 +23,13 @@
 /* ============ overlay layout (matches the mockup) ============ */
 .rm-layout { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
 .rm-layout > * { pointer-events: auto; position: absolute; }
+/* the wrappers must not catch drags on the gaps between cards; only the cards themselves do */
+.rm-layout .rm-bottom, .rm-layout .rm-right { pointer-events: none; }
+.rm-layout .rm-bottom > *, .rm-layout .rm-right > * { pointer-events: auto; }
+.rm-panel input, .rm-panel select, .rm-panel textarea, .rm-card input, .rm-card select, .rm-card textarea { user-select: text; }
 .rm-layout .rm-panel { top: 16px; left: 16px; }
 .rm-layout .rm-right { top: 16px; right: 16px; width: 330px; display: flex; flex-direction: column; gap: 10px; max-height: calc(100% - 32px); overflow-y: auto; }
-.rm-layout .rm-bottom { bottom: 16px; left: 332px; right: 362px; display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; }
+.rm-layout .rm-bottom { bottom: 16px; left: 332px; right: 362px; display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; align-items: end; }
 .rm-layout .rm-viewtoggle { top: 16px; left: 50%; transform: translateX(-50%); }
 
 /* ============ panel ============ */
