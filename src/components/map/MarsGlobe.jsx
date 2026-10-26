@@ -126,6 +126,11 @@ export default function MarsGlobe({ locations, focus, onSelect, layer }) {
       skyBox: false,
       skyAtmosphere: false,
     })
+
+    // Phone / retina screen e blur na hoy: device er asol pixel density use kori
+    viewer.useBrowserRecommendedResolution = false
+    viewer.resolutionScale = Math.min(window.devicePixelRatio || 1, 2)
+
     const scene = viewer.scene
     scene.backgroundColor = Cesium.Color.fromCssColorString('#07090d')
     scene.globe.baseColor = Cesium.Color.fromCssColorString('#2a1208')
@@ -243,14 +248,20 @@ export default function MarsGlobe({ locations, focus, onSelect, layer }) {
         },
         label: {
           text: name,
-          font: '13px Inter, sans-serif',
+          font: '600 14px Inter, sans-serif',
           fillColor: Cesium.Color.WHITE,
           outlineColor: Cesium.Color.BLACK,
           outlineWidth: 3,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          showBackground: true,
+          backgroundColor: Cesium.Color.fromCssColorString('#0b0f17').withAlpha(0.7),
+          backgroundPadding: new Cesium.Cartesian2(6, 4),
           horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
           pixelOffset: new Cesium.Cartesian2(14, dy),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          // Dure gele label chhoto + halka hoye jabe, bhir kombe
+          scaleByDistance: new Cesium.NearFarScalar(1e5, 1.0, 1.5e7, 0.6),
+          translucencyByDistance: new Cesium.NearFarScalar(2e6, 1.0, 2e7, 0.0),
         },
       })
       tracked.push({ ent, position })
@@ -313,7 +324,7 @@ export default function MarsGlobe({ locations, focus, onSelect, layer }) {
           <div className="text-sm font-semibold">{cfg.title}</div>
           <div className="mt-1 hidden text-xs text-gray-400 sm:block">{cfg.note}</div>
           {used && <div className="mt-2 text-xs text-gray-300">Source: {used}</div>}
-                    {cfg.legend && (
+          {cfg.legend && (
             <div className="mt-3">
               <div className="h-3 rounded-full" style={{ background: cfg.legend.bar }} />
               <div className="mt-1 flex justify-between text-[11px] text-gray-400">
