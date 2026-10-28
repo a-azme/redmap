@@ -44,11 +44,6 @@ export default function RouteSettings({ value, onChange }) {
           </label>
 
           <label className="rm-check">
-            <input type="checkbox" checked={value.avoidRough}
-              onChange={(e) => set({ avoidRough: e.target.checked })} />
-            Avoid rough terrain
-          </label>
-          <label className="rm-check">
             <input type="checkbox" checked={value.showScience}
               onChange={(e) => set({ showScience: e.target.checked })} />
             Suggest science stops

@@ -61,6 +61,11 @@ export default function MarsGlobe({
       mapProjection: new Cesium.GeographicProjection(MARS),
       mapMode2D: Cesium.MapMode2D.INFINITE_SCROLL,
     })
+
+    // Phone / retina screen e blur na hoy: device er asol pixel density use kori
+    viewer.useBrowserRecommendedResolution = false
+    viewer.resolutionScale = Math.min(window.devicePixelRatio || 1, 2)
+
     const scene = viewer.scene
     scene.backgroundColor = Cesium.Color.fromCssColorString('#07090d')
     scene.globe.baseColor = Cesium.Color.fromCssColorString('#2a1208')
@@ -157,14 +162,20 @@ export default function MarsGlobe({
         },
         label: {
           text: name,
-          font: '13px Inter, sans-serif',
+          font: '600 14px Inter, sans-serif',
           fillColor: Cesium.Color.WHITE,
           outlineColor: Cesium.Color.BLACK,
           outlineWidth: 3,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          showBackground: true,
+          backgroundColor: Cesium.Color.fromCssColorString('#0b0f17').withAlpha(0.7),
+          backgroundPadding: new Cesium.Cartesian2(6, 4),
           horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
           pixelOffset: new Cesium.Cartesian2(14, dy),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          // Dure gele label chhoto + halka hoye jabe, bhir kombe
+          scaleByDistance: new Cesium.NearFarScalar(1e5, 1.0, 1.5e7, 0.6),
+          translucencyByDistance: new Cesium.NearFarScalar(2e6, 1.0, 2e7, 0.0),
         },
       })
       tracked.push({ ent, position })
@@ -256,6 +267,7 @@ export default function MarsGlobe({
         </button>
       </div>
 
+
       {showCard && cardVisible && (
         <div
           className={`absolute z-20 rounded-2xl border border-white/10 bg-black/80 p-3 backdrop-blur-md shadow-xl transition-all duration-300 w-[260px] sm:w-[280px] ${
@@ -280,6 +292,7 @@ export default function MarsGlobe({
             <div className="mt-2">
               <div className="h-2 rounded-full" style={{ background: cfg.legend.bar }} />
               <div className="mt-1 flex justify-between text-[10px] text-gray-400">
+
                 {cfg.legend.labels.map((l) => (
                   <span key={l}>{l}</span>
                 ))}
