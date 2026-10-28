@@ -3,9 +3,88 @@ import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { Plus, Minus, Crosshair, RotateCcw, X } from 'lucide-react'
 import { TILE_LAYERS, ROVERS } from '../../services/layerService'
-import { MARS, at, applyLayer } from '../../services/tiles'
+import { MARS, at, applyLayer, guardCesiumViewer } from '../../services/tiles'
 
 window.CESIUM_BASE_URL = '/cesium/'
+
+// Persistent singleton Cesium.Viewer so switching between Explore, Layers, and Missions
+// re-parents the existing WebGL canvas instead of destroying and recreating the context.
+let sharedGlobe = null
+
+function getSharedGlobe() {
+  if (sharedGlobe && !sharedGlobe.viewer.isDestroyed()) return sharedGlobe
+
+  const container = document.createElement('div')
+  container.className = 'h-full w-full'
+
+  const viewer = new Cesium.Viewer(container, {
+    baseLayer: false,
+    baseLayerPicker: false,
+    geocoder: false,
+    homeButton: false,
+    sceneModePicker: false,
+    navigationHelpButton: false,
+    animation: false,
+    timeline: false,
+    fullscreenButton: false,
+    infoBox: false,
+    selectionIndicator: false,
+    skyBox: false,
+    skyAtmosphere: false,
+    mapProjection: new Cesium.GeographicProjection(MARS),
+    mapMode2D: Cesium.MapMode2D.INFINITE_SCROLL,
+  })
+
+  // Phone / retina screen e blur na hoy: device er asol pixel density use kori
+  viewer.useBrowserRecommendedResolution = false
+  viewer.resolutionScale = Math.min(window.devicePixelRatio || 1, 2)
+
+  const scene = viewer.scene
+  scene.backgroundColor = Cesium.Color.fromCssColorString('#07090d')
+  scene.globe.baseColor = Cesium.Color.fromCssColorString('#2a1208')
+  scene.globe.showGroundAtmosphere = false
+  scene.globe.enableLighting = false
+  if (scene.sun) scene.sun.show = false
+  if (scene.moon) scene.moon.show = false
+
+  // Render on demand instead of continuous 60 FPS loop when idle
+  scene.requestRenderMode = true
+  scene.maximumRenderTimeChange = Infinity
+  if ('msaaSamples' in scene) scene.msaaSamples = 1
+
+  guardCesiumViewer(viewer)
+
+  const ctrl = scene.screenSpaceCameraController
+  ctrl.minimumZoomDistance = 500
+  ctrl.maximumZoomDistance = 4e7
+
+  viewer.camera.setView({ destination: at(77, 18, 1.2e7) })
+
+  const state = {
+    container,
+    viewer,
+    appliedKey: null,
+    disposeLayer: null,
+    status: 'loading',
+    used: '',
+    locations: [],
+    onSelect: null,
+    onLayerState: null,
+  }
+
+  const handler = new Cesium.ScreenSpaceEventHandler(scene.canvas)
+  handler.setInputAction((e) => {
+    const picked = scene.pick(e.position)
+    const id = picked && picked.id && picked.id.id
+    if (typeof id === 'string' && id.startsWith('loc-')) {
+      const loc = state.locations.find((l) => 'loc-' + l.id === id)
+      if (loc) state.onSelect?.(loc)
+    }
+  }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
+
+  sharedGlobe = state
+  return sharedGlobe
+}
 
 export default function MarsGlobe({
   locations,
@@ -22,86 +101,78 @@ export default function MarsGlobe({
   const viewerRef = useRef(null)
   const onSelectRef = useRef(onSelect)
   const locRef = useRef(locations)
-  onSelectRef.current = onSelect
-  locRef.current = locations
 
-  const [status, setStatus] = useState('loading')
-  const [used, setUsed] = useState('')
-  const [cardVisible, setCardVisible] = useState(true)
   const showCard = layer !== undefined
   const key = layer || 'terrain'
   const cfg = TILE_LAYERS[key] || TILE_LAYERS.terrain
 
+  const [status, setStatus] = useState(() =>
+    sharedGlobe && sharedGlobe.appliedKey === key ? sharedGlobe.status : 'loading'
+  )
+  const [used, setUsed] = useState(() =>
+    sharedGlobe && sharedGlobe.appliedKey === key ? sharedGlobe.used : ''
+  )
+  const [cardVisible, setCardVisible] = useState(true)
+
+  // Keep singleton click handler synced with the currently mounted page
+  useEffect(() => {
+    onSelectRef.current = onSelect
+    locRef.current = locations
+    if (sharedGlobe) {
+      sharedGlobe.locations = locations
+      sharedGlobe.onSelect = onSelect
+    }
+  }, [locations, onSelect])
+
   // Show concise description card on layer change and auto-hide after 5s
   useEffect(() => {
     if (layer === undefined) return
-    setCardVisible(true)
-    const timer = setTimeout(() => {
+    const showTimer = setTimeout(() => setCardVisible(true), 0)
+    const hideTimer = setTimeout(() => {
       setCardVisible(false)
     }, 5000)
-    return () => clearTimeout(timer)
+    return () => {
+      clearTimeout(showTimer)
+      clearTimeout(hideTimer)
+    }
   }, [layer])
 
-  // Initialize viewer once
+  // Attach persistent singleton viewer DOM node into this page's mount point
   useEffect(() => {
-    const viewer = new Cesium.Viewer(elRef.current, {
-      baseLayer: false,
-      baseLayerPicker: false,
-      geocoder: false,
-      homeButton: false,
-      sceneModePicker: false,
-      navigationHelpButton: false,
-      animation: false,
-      timeline: false,
-      fullscreenButton: false,
-      infoBox: false,
-      selectionIndicator: false,
-      skyBox: false,
-      skyAtmosphere: false,
-      mapProjection: new Cesium.GeographicProjection(MARS),
-      mapMode2D: Cesium.MapMode2D.INFINITE_SCROLL,
-    })
+    const host = elRef.current
+    if (!host) return
+    const shared = getSharedGlobe()
+    shared.locations = locRef.current
+    shared.onSelect = (loc) => onSelectRef.current?.(loc)
 
-    // Phone / retina screen e blur na hoy: device er asol pixel density use kori
-    viewer.useBrowserRecommendedResolution = false
-    viewer.resolutionScale = Math.min(window.devicePixelRatio || 1, 2)
+    host.appendChild(shared.container)
+    viewerRef.current = shared.viewer
+    if (host.clientWidth > 0 && host.clientHeight > 0) {
+      shared.viewer.resize()
+      shared.viewer.scene.requestRender()
+    }
 
-    const scene = viewer.scene
-    scene.backgroundColor = Cesium.Color.fromCssColorString('#07090d')
-    scene.globe.baseColor = Cesium.Color.fromCssColorString('#2a1208')
-    scene.globe.showGroundAtmosphere = false
-    scene.globe.enableLighting = false
-    if (scene.sun) scene.sun.show = false
-    if (scene.moon) scene.moon.show = false
-
-    const ctrl = scene.screenSpaceCameraController
-    ctrl.minimumZoomDistance = 500
-    ctrl.maximumZoomDistance = 4e7
-
-    viewer.camera.setView({ destination: at(77, 18, 1.2e7) })
-
-    const handler = new Cesium.ScreenSpaceEventHandler(scene.canvas)
-    handler.setInputAction((e) => {
-      const picked = scene.pick(e.position)
-      const id = picked && picked.id && picked.id.id
-      if (typeof id === 'string' && id.startsWith('loc-')) {
-        const loc = locRef.current.find((l) => 'loc-' + l.id === id)
-        if (loc) onSelectRef.current?.(loc)
+    const ro = new ResizeObserver(() => {
+      if (!shared.viewer.isDestroyed() && host.clientWidth > 0 && host.clientHeight > 0) {
+        shared.viewer.resize()
+        shared.viewer.scene.requestRender()
       }
-    }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
+    })
+    ro.observe(host)
 
-    viewerRef.current = viewer
     return () => {
-      handler.destroy()
-      viewer.destroy()
+      ro.disconnect()
+      if (shared.container.parentNode === host) {
+        host.removeChild(shared.container)
+      }
       viewerRef.current = null
     }
   }, [])
 
   // Switch between 3D Globe and 2D Map View
   useEffect(() => {
-    const viewer = viewerRef.current
-    if (!viewer) return
+    const viewer = viewerRef.current || sharedGlobe?.viewer
+    if (!viewer || viewer.isDestroyed()) return
     const scene = viewer.scene
     const want = mode === '2D' ? Cesium.SceneMode.SCENE2D : Cesium.SceneMode.SCENE3D
     if (scene.mode === want) return
@@ -113,39 +184,92 @@ export default function MarsGlobe({
           duration: 1.0,
         })
       }
+      scene.requestRender()
     }
     scene.morphComplete.addEventListener(onMorphComplete)
     if (mode === '2D') scene.morphTo2D(1.0)
     else scene.morphTo3D(1.0)
+    scene.requestRender()
     return () => {
       if (!viewer.isDestroyed()) scene.morphComplete.removeEventListener(onMorphComplete)
     }
   }, [mode]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load NASA Trek layer with local texture fallback
+  // Load NASA Trek layer with local texture fallback (reuses existing imagery if layer key is unchanged)
   useEffect(() => {
-    const viewer = viewerRef.current
-    if (!viewer) return
+    const shared = getSharedGlobe()
+    const viewer = shared.viewer
+    if (!viewer || viewer.isDestroyed()) return
+
+    let unmounted = false
+    shared.onLayerState = (nextStatus, nextUsed) => {
+      if (unmounted) return
+      if (nextStatus !== undefined) setStatus(nextStatus)
+      if (nextUsed !== undefined) setUsed(nextUsed)
+    }
+
+    if (shared.appliedKey === key && viewer.imageryLayers.length > 0) {
+      Promise.resolve().then(() => {
+        if (!unmounted) {
+          setStatus(shared.status)
+          setUsed(shared.used)
+        }
+      })
+      viewer.scene.requestRender()
+      return () => {
+        unmounted = true
+      }
+    }
+
+    if (typeof shared.disposeLayer === 'function') {
+      shared.disposeLayer()
+      shared.disposeLayer = null
+    }
+
     let cancelled = false
-    setStatus('loading')
-    setUsed('')
+    shared.appliedKey = key
+    shared.status = 'loading'
+    shared.used = ''
+    Promise.resolve().then(() => {
+      if (!unmounted) {
+        setStatus('loading')
+        setUsed('')
+      }
+    })
 
     const dispose = applyLayer(viewer, cfg, key, {
       cancelled: () => cancelled,
-      onStatus: (s) => !cancelled && setStatus(s),
-      onSource: (n) => !cancelled && setUsed(n),
+      onStatus: (s) => {
+        if (!cancelled) {
+          shared.status = s
+          shared.onLayerState?.(s, undefined)
+          if (s === 'ok' || s === 'error') {
+            window.dispatchEvent(new Event('rm:ready'))
+          }
+        }
+      },
+      onSource: (n) => {
+        if (!cancelled) {
+          shared.used = n
+          shared.onLayerState?.(undefined, n)
+        }
+      },
     })
 
-    return () => {
+    shared.disposeLayer = () => {
       cancelled = true
       if (typeof dispose === 'function') dispose()
+    }
+
+    return () => {
+      unmounted = true
     }
   }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Location + rover markers
   useEffect(() => {
-    const viewer = viewerRef.current
-    if (!viewer) return
+    const viewer = viewerRef.current || sharedGlobe?.viewer
+    if (!viewer || viewer.isDestroyed()) return
     viewer.entities.removeAll()
     const tracked = []
 
@@ -193,10 +317,12 @@ export default function MarsGlobe({
       const is3D = viewer.scene.mode === Cesium.SceneMode.SCENE3D
       occluder.cameraPosition = viewer.camera.positionWC
       tracked.forEach(({ ent, position }) => {
-        ent.show = !is3D || occluder.isPointVisible(position)
+        const visible = !is3D || occluder.isPointVisible(position)
+        if (ent.show !== visible) ent.show = visible
       })
     }
     viewer.scene.preRender.addEventListener(onPreRender)
+    viewer.scene.requestRender()
 
     return () => {
       if (!viewer.isDestroyed()) viewer.scene.preRender.removeEventListener(onPreRender)
@@ -205,23 +331,28 @@ export default function MarsGlobe({
 
   // Fly to focused location
   useEffect(() => {
-    const viewer = viewerRef.current
-    if (!viewer || !focus) return
+    const viewer = viewerRef.current || sharedGlobe?.viewer
+    if (!viewer || viewer.isDestroyed() || !focus) return
     viewer.camera.flyTo({ destination: at(focus.lon, focus.lat, 150000), duration: 1.6 })
+    viewer.scene.requestRender()
   }, [focus])
 
   const zoom = (dir) => {
-    const cam = viewerRef.current?.camera
+    const viewer = viewerRef.current || sharedGlobe?.viewer
+    const cam = viewer?.camera
     if (!cam) return
     const h = cam.positionCartographic.height
     dir > 0 ? cam.zoomIn(h * 0.5) : cam.zoomOut(h * 0.7)
+    viewer.scene.requestRender()
   }
 
   const handleCenter = () => {
     if (onCenter) {
       onCenter()
     } else if (focus) {
-      viewerRef.current?.camera.flyTo({ destination: at(focus.lon, focus.lat, 150000), duration: 1.6 })
+      const viewer = viewerRef.current || sharedGlobe?.viewer
+      viewer?.camera.flyTo({ destination: at(focus.lon, focus.lat, 150000), duration: 1.6 })
+      viewer?.scene.requestRender()
     }
   }
 
@@ -229,13 +360,14 @@ export default function MarsGlobe({
     if (onReset) {
       onReset()
     } else {
-      const viewer = viewerRef.current
+      const viewer = viewerRef.current || sharedGlobe?.viewer
       if (!viewer) return
       if (viewer.scene.mode === Cesium.SceneMode.SCENE2D) {
         viewer.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(-180, -85, 180, 85), duration: 1.6 })
       } else {
         viewer.camera.flyTo({ destination: at(77, 18, 1.2e7), duration: 1.6 })
       }
+      viewer.scene.requestRender()
     }
   }
 

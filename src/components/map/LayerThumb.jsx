@@ -1,46 +1,11 @@
 import { useEffect, useState } from 'react'
 import { TILE_LAYERS } from '../../services/layerService'
+import { colorizeToDataUrl } from '../../services/tiles'
 
 // Jezero er ashepashe ekta chhoto tile thumbnail hishebe use hobe
 const LON = 77.5
 const LAT = 18.4
 const MAX_Z = 4
-
-// Grayscale THEMIS ke false-color (Temperature layer er moto)
-const RAMP = [
-  [25, 35, 130], [70, 50, 180], [180, 50, 140],
-  [240, 100, 50], [255, 200, 70], [255, 248, 200],
-]
-function rampColor(t) {
-  const p = Math.min(1, Math.max(0, t)) * (RAMP.length - 1)
-  const i = Math.min(RAMP.length - 2, Math.floor(p))
-  const u = p - i
-  const a = RAMP[i]
-  const b = RAMP[i + 1]
-  return [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u]
-}
-function colorize(img) {
-  const c = document.createElement('canvas')
-  c.width = img.width
-  c.height = img.height
-  const ctx = c.getContext('2d', { willReadFrequently: true })
-  ctx.drawImage(img, 0, 0)
-  const d = ctx.getImageData(0, 0, c.width, c.height)
-  for (let i = 0; i < d.data.length; i += 4) {
-    const v = d.data[i]
-    if (v < 8) {
-      d.data[i + 3] = 0
-      continue
-    }
-    const [r, g, b] = rampColor(v / 255)
-    d.data[i] = r
-    d.data[i + 1] = g
-    d.data[i + 2] = b
-    d.data[i + 3] = 255
-  }
-  ctx.putImageData(d, 0, 0)
-  return c.toDataURL('image/png')
-}
 
 const load = (url, cors) =>
   new Promise((resolve) => {
@@ -71,7 +36,7 @@ async function build(layerId) {
         if (!img) continue
         if (s.colorize) {
           try {
-            return colorize(img)
+            return colorizeToDataUrl(img)
           } catch {
             return null
           }

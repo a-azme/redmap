@@ -2,28 +2,163 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <script>
-      (function () {
-        try {
-          if (window.top !== window.self) return;
-          if (sessionStorage.getItem('rm_enter')) {
-            sessionStorage.removeItem('rm_enter');
-            return;
-          }
-        } catch (e) { return; }
-        location.replace('/landing/index.html');
-      })();
-    </script>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#050304" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>redmap</title>
-
+    <title>RedMap: Interplanetary Survival Guide</title>
+    <meta name="description" content="3D/2D Martian mapping and EVA routing tool for future astronauts powered by NASA Mars Trek data." />
+    <meta property="og:title" content="RedMap: Interplanetary Survival Guide" />
+    <meta property="og:description" content="3D/2D Martian mapping and EVA routing tool for future astronauts powered by NASA Mars Trek data." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preload" as="image" href="/assets/mars.jpg" media="(min-width: 701px)" />
+    <link rel="preload" as="image" href="/assets/mars-mobile.jpg" media="(max-width: 700px)" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Poppins:wght@800&display=swap" />
+    <style>
+      #rm-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        overflow: hidden;
+        background: #050304;
+        color: #f4efec;
+        font-family: "Google Sans", "Product Sans", "Outfit", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        transition: opacity 0.6s ease;
+      }
+      #rm-splash.is-hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #rm-splash .rm-sky {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        background:
+          radial-gradient(120% 60% at 85% 105%, #c2491f 0%, #5a1d0d 35%, transparent 60%),
+          radial-gradient(60% 40% at 20% 20%, #2a1612 0%, transparent 70%),
+          #050304;
+      }
+      #rm-splash .rm-sky img {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        object-position: 60% 50%;
+        opacity: 0;
+        transition: opacity 1s ease;
+        transform: scale(1.04);
+        animation: rm-drift 40s ease-in-out infinite alternate;
+      }
+      #rm-splash .rm-sky img.ready {
+        opacity: 1;
+      }
+      #rm-splash .rm-sky::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(90% 70% at 50% 40%, transparent 40%, rgba(0, 0, 0, 0.45) 100%);
+      }
+      @keyframes rm-drift {
+        from { transform: scale(1.04); }
+        to { transform: scale(1.12) translate3d(-1.5%, 1%, 0); }
+      }
+      #rm-splash .rm-center {
+        position: relative;
+        z-index: 2;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 24px;
+        margin-top: -4vh;
+        padding-top: calc(24px + env(safe-area-inset-top, 0px));
+        padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+      }
+      #rm-splash h1 {
+        font-weight: 400;
+        font-size: clamp(1.9rem, 2.9vw, 2.9rem);
+        letter-spacing: -0.01em;
+        line-height: 1;
+        text-shadow: 0 2px 30px rgba(0, 0, 0, 0.6);
+      }
+      #rm-splash .rm-arc {
+        width: 20px;
+        height: 20px;
+        margin-top: 22px;
+      }
+      #rm-splash .rm-arc circle {
+        fill: none;
+        stroke: #ff5a2b;
+        stroke-width: 3.5;
+        stroke-linecap: round;
+        stroke-dasharray: 22 70;
+        transform-origin: center;
+        animation: rm-spin 1.1s linear infinite;
+      }
+      @keyframes rm-spin {
+        to { transform: rotate(360deg); }
+      }
+      @media (max-width: 700px) {
+        #rm-splash .rm-sky img { object-position: 55% 50%; }
+        #rm-splash .rm-center { margin-top: -8vh; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #rm-splash .rm-sky img { animation: none; transform: none; }
+      }
+    </style>
   </head>
   <body>
+    <div id="rm-splash" aria-hidden="true">
+      <div class="rm-sky">
+        <picture>
+          <source media="(max-width:700px)" srcset="/assets/mars-mobile.jpg" />
+          <img id="rm-splash-bg" src="/assets/mars.jpg" alt="" decoding="async" fetchpriority="high" />
+        </picture>
+      </div>
+      <div class="rm-center">
+        <h1>Red Map</h1>
+        <svg class="rm-arc" viewBox="0 0 30 30" role="img" aria-label="Loading">
+          <circle cx="15" cy="15" r="11" />
+        </svg>
+      </div>
+    </div>
     <div id="root"></div>
+    <script>
+      (function () {
+        var splash = document.getElementById('rm-splash');
+        if (!splash) return;
+
+        var start = Date.now();
+        var MIN_MS = 1200;
+        var MAX_MS = 3000;
+        var bg = document.getElementById('rm-splash-bg');
+        if (bg) {
+          var show = function () { bg.classList.add('ready'); };
+          if (bg.complete && bg.naturalWidth) show();
+          else {
+            bg.addEventListener('load', show, { once: true });
+            bg.addEventListener('error', show, { once: true });
+          }
+        }
+        var done = false;
+        function dismiss() {
+          if (done) return;
+          done = true;
+          splash.classList.add('is-hidden');
+          setTimeout(function () { splash.remove(); }, 650);
+        }
+        function scheduleDismiss() {
+          setTimeout(dismiss, Math.max(0, MIN_MS - (Date.now() - start)));
+        }
+        window.addEventListener('rm:ready', scheduleDismiss, { once: true });
+        setTimeout(dismiss, MAX_MS);
+      })();
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
