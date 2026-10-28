@@ -171,6 +171,22 @@ export default function MarsGlobe({ locations, focus, onSelect, layer }) {
     setStatus('loading')
     setUsed('')
 
+    // Jezero overlay (CTX/HiRISE) shudhu kachhe gele dekhabo.
+    // Dure thakle oi grayscale chowko box ta dekha jay, tai fade out kore dei.
+    const overlayLayers = []
+    const FADE_FULL = 3e5 // eta er niche hole puro dekhabe
+    const FADE_ZERO = 9e5 // eta er upore hole ekdom dekhabe na
+    const fadeOverlays = () => {
+      if (viewer.isDestroyed() || overlayLayers.length === 0) return
+      const h = viewer.camera.positionCartographic.height
+      const a = Math.min(1, Math.max(0, (FADE_ZERO - h) / (FADE_ZERO - FADE_FULL)))
+      overlayLayers.forEach((l) => {
+        l.alpha = a
+        l.show = a > 0
+      })
+    }
+    viewer.scene.preRender.addEventListener(fadeOverlays)
+
     ;(async () => {
       // Source gulo ekta ekta kore try
       let chosen = null
@@ -213,17 +229,20 @@ export default function MarsGlobe({ locations, focus, onSelect, layer }) {
         const oext = await findExt(o.url, [8, 6], (w + e) / 2, (s + n) / 2)
         if (cancelled || viewer.isDestroyed()) return
         if (!oext) continue
-        viewer.imageryLayers.addImageryProvider(
+        const layerObj = viewer.imageryLayers.addImageryProvider(
           makeProvider(o.url, oext, {
             maximumLevel: o.maxNativeZoom,
             rectangle: Cesium.Rectangle.fromDegrees(w, s, e, n),
           })
         )
+        overlayLayers.push(layerObj)
+        fadeOverlays()
       }
     })()
 
     return () => {
       cancelled = true
+      if (!viewer.isDestroyed()) viewer.scene.preRender.removeEventListener(fadeOverlays)
     }
   }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
 
