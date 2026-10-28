@@ -1,101 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
 import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
-import { Plus, Minus } from 'lucide-react'
+import { Plus, Minus, Crosshair, RotateCcw, X } from 'lucide-react'
 import { TILE_LAYERS, ROVERS } from '../../services/layerService'
+import { MARS, at, applyLayer } from '../../services/tiles'
 
 window.CESIUM_BASE_URL = '/cesium/'
 
-const MARS = Cesium.Ellipsoid.MARS
-Cesium.Ellipsoid.default = MARS
-
-const toLon = (lon) => (lon > 180 ? lon - 360 : lon)
-const at = (lon, lat, h = 0) => Cesium.Cartesian3.fromDegrees(toLon(lon), lat, h, MARS)
-
-const tileXY = (lon, lat, z) => ({
-  x: Math.floor(((lon + 180) / 360) * 2 ** (z + 1)),
-  y: Math.floor(((90 - lat) / 180) * 2 ** z),
-})
-
-const fill = (tpl, ext, z, x, y) =>
-  tpl.replace('{ext}', ext).replace('{z}', z).replace('{y}', y).replace('{x}', x)
-
-const probe = (url) =>
-  new Promise((resolve) => {
-    const img = new Image()
-    img.onload = () => resolve(true)
-    img.onerror = () => resolve(false)
-    img.src = url
-  })
-
-// Kon zoom + kon extension (jpg/png) e tile ache ta khuje ber kore
-async function findExt(tpl, zooms, lon, lat) {
-  for (const z of zooms) {
-    const { x, y } = tileXY(lon, lat, z)
-    for (const ext of ['jpg', 'png']) {
-      const url = fill(tpl, ext, z, x, y)
-      const ok = await probe(url)
-      console.info('[RedMap]', ok ? 'OK  ' : '404 ', url)
-      if (ok) return ext
-    }
-  }
-  return null
-}
-
-const makeProvider = (tpl, ext, opts) => {
-  const p = new Cesium.UrlTemplateImageryProvider({
-    url: tpl.replace('{ext}', ext),
-    tilingScheme: new Cesium.GeographicTilingScheme({ ellipsoid: MARS }),
-    tileWidth: 256,
-    tileHeight: 256,
-    credit: 'NASA/JPL Trek, USGS',
-    ...opts,
-  })
-  p.errorEvent.addEventListener((e) => {
-    e.retry = false
-  })
-  return p
-}
-
-// Grayscale THEMIS ke false-color kore (neel = thanda, holud = gorom)
-const RAMP = [
-  [25, 35, 130], [70, 50, 180], [180, 50, 140],
-  [240, 100, 50], [255, 200, 70], [255, 248, 200],
-]
-function rampColor(t) {
-  const p = Math.min(1, Math.max(0, t)) * (RAMP.length - 1)
-  const i = Math.min(RAMP.length - 2, Math.floor(p))
-  const u = p - i
-  const a = RAMP[i]
-  const b = RAMP[i + 1]
-  return [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u]
-}
-function colorizeImage(img) {
-  const w = img.width
-  const h = img.height
-  const c = document.createElement('canvas')
-  c.width = w
-  c.height = h
-  const ctx = c.getContext('2d', { willReadFrequently: true })
-  ctx.drawImage(img, 0, 0)
-  const d = ctx.getImageData(0, 0, w, h)
-  for (let i = 0; i < d.data.length; i += 4) {
-    const v = d.data[i]
-    if (v < 8) {
-      d.data[i + 3] = 0 // no-data
-      continue
-    }
-    const [r, g, b] = rampColor(v / 255)
-    d.data[i] = r
-    d.data[i + 1] = g
-    d.data[i + 2] = b
-    d.data[i + 3] = 255
-  }
-  ctx.putImageData(d, 0, 0)
-  return c
-}
-
-export default function MarsGlobe({ locations, focus, onSelect, layer }) {
+export default function MarsGlobe({
+  locations,
+  focus,
+  onSelect,
+  layer,
+  mode = '3D',
+  onCenter,
+  onReset,
+  controlsClassName,
+  legendClassName,
+}) {
   const elRef = useRef(null)
   const viewerRef = useRef(null)
   const onSelectRef = useRef(onSelect)
@@ -105,11 +27,22 @@ export default function MarsGlobe({ locations, focus, onSelect, layer }) {
 
   const [status, setStatus] = useState('loading')
   const [used, setUsed] = useState('')
+  const [cardVisible, setCardVisible] = useState(true)
   const showCard = layer !== undefined
   const key = layer || 'terrain'
   const cfg = TILE_LAYERS[key] || TILE_LAYERS.terrain
 
-  // Globe ekbar toiri
+  // Show concise description card on layer change and auto-hide after 5s
+  useEffect(() => {
+    if (layer === undefined) return
+    setCardVisible(true)
+    const timer = setTimeout(() => {
+      setCardVisible(false)
+    }, 5000)
+    return () => clearTimeout(timer)
+  }, [layer])
+
+  // Initialize viewer once
   useEffect(() => {
     const viewer = new Cesium.Viewer(elRef.current, {
       baseLayer: false,
@@ -125,6 +58,8 @@ export default function MarsGlobe({ locations, focus, onSelect, layer }) {
       selectionIndicator: false,
       skyBox: false,
       skyAtmosphere: false,
+      mapProjection: new Cesium.GeographicProjection(MARS),
+      mapMode2D: Cesium.MapMode2D.INFINITE_SCROLL,
     })
     const scene = viewer.scene
     scene.backgroundColor = Cesium.Color.fromCssColorString('#07090d')
@@ -158,7 +93,31 @@ export default function MarsGlobe({ locations, focus, onSelect, layer }) {
     }
   }, [])
 
-  // Layer change hole NASA tile change
+  // Switch between 3D Globe and 2D Map View
+  useEffect(() => {
+    const viewer = viewerRef.current
+    if (!viewer) return
+    const scene = viewer.scene
+    const want = mode === '2D' ? Cesium.SceneMode.SCENE2D : Cesium.SceneMode.SCENE3D
+    if (scene.mode === want) return
+    const onMorphComplete = () => {
+      scene.morphComplete.removeEventListener(onMorphComplete)
+      if (focus) {
+        viewer.camera.flyTo({
+          destination: at(focus.lon, focus.lat, mode === '2D' ? 6e6 : 150000),
+          duration: 1.0,
+        })
+      }
+    }
+    scene.morphComplete.addEventListener(onMorphComplete)
+    if (mode === '2D') scene.morphTo2D(1.0)
+    else scene.morphTo3D(1.0)
+    return () => {
+      if (!viewer.isDestroyed()) scene.morphComplete.removeEventListener(onMorphComplete)
+    }
+  }, [mode]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load NASA Trek layer with local texture fallback
   useEffect(() => {
     const viewer = viewerRef.current
     if (!viewer) return
@@ -166,63 +125,18 @@ export default function MarsGlobe({ locations, focus, onSelect, layer }) {
     setStatus('loading')
     setUsed('')
 
-    ;(async () => {
-      // Source gulo ekta ekta kore try
-      let chosen = null
-      let ext = null
-      for (const s of cfg.sources) {
-        ext = await findExt(s.url, [1], 77.5, 18.4)
-        if (cancelled || viewer.isDestroyed()) return
-        if (ext) {
-          chosen = s
-          break
-        }
-      }
-      if (!chosen) {
-        console.warn('[RedMap] No working tile source for layer:', key)
-        viewer.imageryLayers.removeAll()
-        setStatus('error')
-        return
-      }
-      setUsed(chosen.name)
-
-      const base = makeProvider(chosen.url, ext, { maximumLevel: chosen.maxNativeZoom })
-      const orig = base.requestImage.bind(base)
-      base.requestImage = (x, y, level, request) => {
-        let p = orig(x, y, level, request)
-        if (p && p.then && chosen.colorize) p = p.then(colorizeImage)
-        if (p && p.then) {
-          p.then(() => {
-            if (!cancelled) setStatus('ok')
-          }, () => {})
-        }
-        return p
-      }
-
-      viewer.imageryLayers.removeAll()
-      viewer.imageryLayers.addImageryProvider(base)
-
-      // Jezero er sharp overlay (CTX, HiRISE)
-      for (const o of cfg.overlays || []) {
-        const [w, s, e, n] = o.rect
-        const oext = await findExt(o.url, [8, 6], (w + e) / 2, (s + n) / 2)
-        if (cancelled || viewer.isDestroyed()) return
-        if (!oext) continue
-        viewer.imageryLayers.addImageryProvider(
-          makeProvider(o.url, oext, {
-            maximumLevel: o.maxNativeZoom,
-            rectangle: Cesium.Rectangle.fromDegrees(w, s, e, n),
-          })
-        )
-      }
-    })()
+    applyLayer(viewer, cfg, key, {
+      cancelled: () => cancelled,
+      onStatus: (s) => !cancelled && setStatus(s),
+      onSource: (n) => !cancelled && setUsed(n),
+    })
 
     return () => {
       cancelled = true
     }
   }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Location + rover marker
+  // Location + rover markers
   useEffect(() => {
     const viewer = viewerRef.current
     if (!viewer) return
@@ -261,12 +175,13 @@ export default function MarsGlobe({ locations, focus, onSelect, layer }) {
       ROVERS.forEach((r) => add('rover-' + r.id, r.name, r.lon, r.lat, '#38bdf8', 16))
     }
 
-    // Globe er opor pashe thaka marker lukiye rakhi
+    // Hide far-side markers in 3D, show all in 2D
     const occluder = new Cesium.EllipsoidalOccluder(MARS, viewer.camera.positionWC)
     const onPreRender = () => {
+      const is3D = viewer.scene.mode === Cesium.SceneMode.SCENE3D
       occluder.cameraPosition = viewer.camera.positionWC
       tracked.forEach(({ ent, position }) => {
-        ent.show = occluder.isPointVisible(position)
+        ent.show = !is3D || occluder.isPointVisible(position)
       })
     }
     viewer.scene.preRender.addEventListener(onPreRender)
@@ -276,7 +191,7 @@ export default function MarsGlobe({ locations, focus, onSelect, layer }) {
     }
   }, [locations, key])
 
-  // Location e zoom
+  // Fly to focused location
   useEffect(() => {
     const viewer = viewerRef.current
     if (!viewer || !focus) return
@@ -288,6 +203,28 @@ export default function MarsGlobe({ locations, focus, onSelect, layer }) {
     if (!cam) return
     const h = cam.positionCartographic.height
     dir > 0 ? cam.zoomIn(h * 0.5) : cam.zoomOut(h * 0.7)
+  }
+
+  const handleCenter = () => {
+    if (onCenter) {
+      onCenter()
+    } else if (focus) {
+      viewerRef.current?.camera.flyTo({ destination: at(focus.lon, focus.lat, 150000), duration: 1.6 })
+    }
+  }
+
+  const handleReset = () => {
+    if (onReset) {
+      onReset()
+    } else {
+      const viewer = viewerRef.current
+      if (!viewer) return
+      if (viewer.scene.mode === Cesium.SceneMode.SCENE2D) {
+        viewer.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(-180, -85, 180, 85), duration: 1.6 })
+      } else {
+        viewer.camera.flyTo({ destination: at(77, 18, 1.2e7), duration: 1.6 })
+      }
+    }
   }
 
   const msg = {
@@ -303,33 +240,62 @@ export default function MarsGlobe({ locations, focus, onSelect, layer }) {
     <div className="relative isolate h-full w-full">
       <div ref={elRef} className="h-full w-full" />
 
-      <div className="absolute right-3 top-3 z-10 flex flex-col gap-2 xl:left-[330px] xl:right-auto xl:top-[110px]">
-        <button className={btn} onClick={() => zoom(1)}><Plus size={18} /></button>
-        <button className={btn} onClick={() => zoom(-1)}><Minus size={18} /></button>
+      {/* Zoom in, Zoom out, Center on location, Reset buttons on the right top side */}
+      <div className={`absolute z-20 flex flex-col gap-2 ${controlsClassName || 'right-3 top-3 sm:right-4 sm:top-4'}`}>
+        <button className={btn} onClick={() => zoom(1)} title="Zoom in" aria-label="Zoom in">
+          <Plus size={18} />
+        </button>
+        <button className={btn} onClick={() => zoom(-1)} title="Zoom out" aria-label="Zoom out">
+          <Minus size={18} />
+        </button>
+        <button className={btn} onClick={handleCenter} title="Center on location" aria-label="Center on location">
+          <Crosshair size={18} />
+        </button>
+        <button className={btn} onClick={handleReset} title="Reset view" aria-label="Reset view">
+          <RotateCcw size={18} />
+        </button>
       </div>
 
-      {showCard && (
-        <div className="absolute bottom-[136px] left-2 right-2 z-10 rounded-2xl border border-white/10 bg-black/70 p-3 backdrop-blur-md sm:right-auto sm:w-[330px] xl:bottom-[132px] xl:left-[330px] xl:p-4">
-          <div className="text-sm font-semibold">{cfg.title}</div>
-          <div className="mt-1 hidden text-xs text-gray-400 sm:block">{cfg.note}</div>
-          {used && <div className="mt-2 text-xs text-gray-300">Source: {used}</div>}
-                    {cfg.legend && (
-            <div className="mt-3">
-              <div className="h-3 rounded-full" style={{ background: cfg.legend.bar }} />
-              <div className="mt-1 flex justify-between text-[11px] text-gray-400">
+      {showCard && cardVisible && (
+        <div
+          className={`absolute z-20 rounded-2xl border border-white/10 bg-black/80 p-3 backdrop-blur-md shadow-xl transition-all duration-300 w-[260px] sm:w-[280px] ${
+            legendClassName || 'bottom-28 left-1/2 -translate-x-1/2'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-white">{cfg.title}</span>
+            <button
+              onClick={() => setCardVisible(false)}
+              className="rounded p-0.5 text-gray-400 hover:bg-white/10 hover:text-white"
+              title="Close description"
+              aria-label="Close"
+            >
+              <X size={13} />
+            </button>
+          </div>
+          <div className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-gray-300">
+            {cfg.note}
+          </div>
+          {cfg.legend && (
+            <div className="mt-2">
+              <div className="h-2 rounded-full" style={{ background: cfg.legend.bar }} />
+              <div className="mt-1 flex justify-between text-[10px] text-gray-400">
                 {cfg.legend.labels.map((l) => (
                   <span key={l}>{l}</span>
                 ))}
               </div>
             </div>
           )}
-          <div
-            className={`mt-2 border-t border-white/10 pt-2 text-xs ${
-              status === 'error' ? 'text-red-400' : 'text-gray-400'
-            }`}
-          >
-            {msg}
-          </div>
+          {used && (
+            <div className="mt-1.5 truncate text-[10px] text-gray-400">
+              Source: {used}
+            </div>
+          )}
+          {status === 'error' && (
+            <div className="mt-1 border-t border-white/10 pt-1 text-[10px] text-red-400">
+              {msg}
+            </div>
+          )}
         </div>
       )}
     </div>

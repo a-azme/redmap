@@ -77,6 +77,19 @@ function colorizeImage(img) {
  * cb = { cancelled: () => bool, onStatus: (s) => void, onSource: (name) => void }
  */
 export async function applyLayer(viewer, cfg, key, cb) {
+  if (viewer.imageryLayers.length === 0) {
+    Cesium.SingleTileImageryProvider.fromUrl('/textures/mars.jpg', {
+      rectangle: Cesium.Rectangle.MAX_VALUE,
+      ellipsoid: MARS,
+    })
+      .then((lowRes) => {
+        if (!cb.cancelled() && !viewer.isDestroyed() && viewer.imageryLayers.length === 0) {
+          viewer.imageryLayers.addImageryProvider(lowRes)
+        }
+      })
+      .catch(() => {})
+  }
+
   let chosen = null
   let ext = null
   for (const s of cfg.sources) {
@@ -85,7 +98,27 @@ export async function applyLayer(viewer, cfg, key, cb) {
     if (ext) { chosen = s; break }
   }
   if (!chosen) {
-    console.warn('[RedMap] No working tile source for layer:', key)
+    console.warn('[RedMap] No working tile source for layer:', key, '– using local texture fallback')
+    try {
+      const fallback = await Cesium.SingleTileImageryProvider.fromUrl('/textures/8k_mars.jpg', {
+        rectangle: Cesium.Rectangle.MAX_VALUE,
+        ellipsoid: MARS,
+      }).catch(() =>
+        Cesium.SingleTileImageryProvider.fromUrl('/textures/mars.jpg', {
+          rectangle: Cesium.Rectangle.MAX_VALUE,
+          ellipsoid: MARS,
+        })
+      )
+      if (!cb.cancelled() && !viewer.isDestroyed() && fallback) {
+        viewer.imageryLayers.removeAll()
+        viewer.imageryLayers.addImageryProvider(fallback)
+        cb.onSource('Local 8K Mars Texture')
+        cb.onStatus('ok')
+        return
+      }
+    } catch {
+      // ignore
+    }
     viewer.imageryLayers.removeAll()
     cb.onStatus('error')
     return
