@@ -30,3 +30,15 @@ html, body, #root {
   font-size: 12px;
 }
 .redmap-tip::before { display: none; }
+
+.cesium-viewer-bottom {
+  left: 8px !important;
+  bottom: 2px !important;
+  z-index: 5 !important;
+  max-width: 50% !important;
+}
+
+.cesium-viewer .cesium-widget-credits {
+  font-size: 10px !important;
+  opacity: 0.6;
+}

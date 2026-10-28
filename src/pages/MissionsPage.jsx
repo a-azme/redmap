@@ -128,8 +128,17 @@ export default function MissionsPage() {
 
       {/* Center: globe */}
       <main className="relative order-first h-[45vh] min-h-[300px] overflow-hidden rounded-2xl border border-white/10 bg-[#07090c] xl:order-none xl:h-auto xl:min-h-0">
-        <MarsGlobe locations={pins} focus={focus} onSelect={(d) => select(byId(d.id))} />
-        <div className="pointer-events-none absolute bottom-3 left-3 flex gap-3 rounded-lg bg-black/50 px-3 py-1.5 text-[11px] text-white/70">
+        <MarsGlobe
+          locations={pins}
+          focus={focus}
+          onSelect={(d) => select(byId(d.id))}
+          onCenter={() => landed && setFocus({ lat: sel.lat, lon: sel.lon })}
+          onReset={() => {
+            setFocus({ lat: 18.44, lon: 77.45 })
+            setSelId('perseverance')
+          }}
+        />
+        <div className="pointer-events-none absolute bottom-3 right-3 z-20 flex gap-3 rounded-lg bg-black/60 backdrop-blur-md px-3 py-1.5 text-[11px] text-white/70 border border-white/10">
           <span><i className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: TYPE_COLOR.rover }} />Rover</span>
           <span><i className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: TYPE_COLOR.lander }} />Lander</span>
           <span className="hidden text-white/40 sm:inline">Orbiters cover the whole planet</span>
