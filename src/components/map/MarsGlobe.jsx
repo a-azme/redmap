@@ -130,86 +130,15 @@ export default function MarsGlobe({
     setStatus('loading')
     setUsed('')
 
-<<<<<<< HEAD
-    // Jezero overlay (CTX/HiRISE) shudhu kachhe gele dekhabo.
-    // Dure thakle oi grayscale chowko box ta dekha jay, tai fade out kore dei.
-    const overlayLayers = []
-    const FADE_FULL = 3e5 // eta er niche hole puro dekhabe
-    const FADE_ZERO = 9e5 // eta er upore hole ekdom dekhabe na
-    const fadeOverlays = () => {
-      if (viewer.isDestroyed() || overlayLayers.length === 0) return
-      const h = viewer.camera.positionCartographic.height
-      const a = Math.min(1, Math.max(0, (FADE_ZERO - h) / (FADE_ZERO - FADE_FULL)))
-      overlayLayers.forEach((l) => {
-        l.alpha = a
-        l.show = a > 0
-      })
-    }
-    viewer.scene.preRender.addEventListener(fadeOverlays)
-
-    ;(async () => {
-      // Source gulo ekta ekta kore try
-      let chosen = null
-      let ext = null
-      for (const s of cfg.sources) {
-        ext = await findExt(s.url, [1], 77.5, 18.4)
-        if (cancelled || viewer.isDestroyed()) return
-        if (ext) {
-          chosen = s
-          break
-        }
-      }
-      if (!chosen) {
-        console.warn('[RedMap] No working tile source for layer:', key)
-        viewer.imageryLayers.removeAll()
-        setStatus('error')
-        return
-      }
-      setUsed(chosen.name)
-
-      const base = makeProvider(chosen.url, ext, { maximumLevel: chosen.maxNativeZoom })
-      const orig = base.requestImage.bind(base)
-      base.requestImage = (x, y, level, request) => {
-        let p = orig(x, y, level, request)
-        if (p && p.then && chosen.colorize) p = p.then(colorizeImage)
-        if (p && p.then) {
-          p.then(() => {
-            if (!cancelled) setStatus('ok')
-          }, () => {})
-        }
-        return p
-      }
-
-      viewer.imageryLayers.removeAll()
-      viewer.imageryLayers.addImageryProvider(base)
-
-      // Jezero er sharp overlay (CTX, HiRISE)
-      for (const o of cfg.overlays || []) {
-        const [w, s, e, n] = o.rect
-        const oext = await findExt(o.url, [8, 6], (w + e) / 2, (s + n) / 2)
-        if (cancelled || viewer.isDestroyed()) return
-        if (!oext) continue
-        const layerObj = viewer.imageryLayers.addImageryProvider(
-          makeProvider(o.url, oext, {
-            maximumLevel: o.maxNativeZoom,
-            rectangle: Cesium.Rectangle.fromDegrees(w, s, e, n),
-          })
-        )
-        overlayLayers.push(layerObj)
-        fadeOverlays()
-      }
-    })()
-=======
-    applyLayer(viewer, cfg, key, {
+    const dispose = applyLayer(viewer, cfg, key, {
       cancelled: () => cancelled,
       onStatus: (s) => !cancelled && setStatus(s),
       onSource: (n) => !cancelled && setUsed(n),
     })
->>>>>>> 0588600df21e776cb6072bc275e8c31f3f13ab71
 
     return () => {
       cancelled = true
-      if (!viewer.isDestroyed()) viewer.scene.preRender.removeEventListener(fadeOverlays)
+      if (typeof dispose === 'function') dispose()
     }
   }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -339,7 +268,6 @@ export default function MarsGlobe({
         </button>
       </div>
 
-
       {showCard && cardVisible && (
         <div
           className={`absolute z-20 rounded-2xl border border-white/10 bg-black/80 p-3 backdrop-blur-md shadow-xl transition-all duration-300 w-[260px] sm:w-[280px] ${
@@ -364,7 +292,6 @@ export default function MarsGlobe({
             <div className="mt-2">
               <div className="h-2 rounded-full" style={{ background: cfg.legend.bar }} />
               <div className="mt-1 flex justify-between text-[10px] text-gray-400">
-
                 {cfg.legend.labels.map((l) => (
                   <span key={l}>{l}</span>
                 ))}
