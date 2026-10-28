@@ -12,7 +12,6 @@
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="preload" as="image" href="/assets/mars.jpg" media="(min-width: 701px)" />
-    <link rel="preload" as="image" href="/assets/mars-mobile.jpg" media="(max-width: 700px)" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Poppins:wght@800&display=swap" />
@@ -66,30 +65,37 @@
         to { transform: scale(1.12) translate3d(-1.5%, 1%, 0); }
       }
       #rm-splash .rm-center {
-        position: relative;
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
         z-index: 2;
-        height: 100%;
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
         text-align: center;
-        padding: 24px;
-        margin-top: -4vh;
-        padding-top: calc(24px + env(safe-area-inset-top, 0px));
-        padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+        white-space: nowrap;
       }
       #rm-splash h1 {
+        margin: 0;
+        color: #ffffff;
         font-weight: 400;
         font-size: clamp(1.9rem, 2.9vw, 2.9rem);
         letter-spacing: -0.01em;
         line-height: 1;
         text-shadow: 0 2px 30px rgba(0, 0, 0, 0.6);
       }
+      #rm-splash h1 .rm-red {
+        color: #FF3B30;
+      }
       #rm-splash .rm-arc {
+        position: absolute;
+        top: calc(100% + 18px);
+        left: 50%;
+        transform: translateX(-50%);
         width: 20px;
         height: 20px;
-        margin-top: 22px;
       }
       #rm-splash .rm-arc circle {
         fill: none;
@@ -105,7 +111,6 @@
       }
       @media (max-width: 700px) {
         #rm-splash .rm-sky img { object-position: 55% 50%; }
-        #rm-splash .rm-center { margin-top: -8vh; }
       }
       @media (prefers-reduced-motion: reduce) {
         #rm-splash .rm-sky img { animation: none; transform: none; }
@@ -116,15 +121,14 @@
     <div id="rm-splash" aria-hidden="true">
       <div class="rm-sky">
         <picture>
-          <source media="(max-width:700px)" srcset="/assets/mars-mobile.jpg" />
           <img id="rm-splash-bg" src="/assets/mars.jpg" alt="" decoding="async" fetchpriority="high" />
         </picture>
       </div>
       <div class="rm-center">
-        <h1>Red Map</h1>
         <svg class="rm-arc" viewBox="0 0 30 30" role="img" aria-label="Loading">
           <circle cx="15" cy="15" r="11" />
         </svg>
+        <h1><span class="rm-red">Red</span> Map</h1>
       </div>
     </div>
     <div id="root"></div>
