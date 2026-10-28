@@ -35,7 +35,8 @@ export default function SearchBar() {
 
   return (
     <div ref={boxRef} className="relative">
-      <div className="flex items-center gap-2 bg-panel-2 border border-line rounded-full px-4 py-2 w-40 sm:w-56 xl:w-72">
+      {/* Phone e box ektu boro (w-48) ar padding kom (px-3), jate "Search location" puro dekhay */}
+      <div className="flex items-center gap-1.5 bg-panel-2 border border-line rounded-full px-3 py-2 w-48 sm:gap-2 sm:px-4 sm:w-56 xl:w-72">
         <input
           value={query}
           onChange={(e) => {
@@ -48,9 +49,9 @@ export default function SearchBar() {
             if (e.key === 'Escape') setOpen(false)
           }}
           placeholder="Search location..."
-          className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted sm:text-sm"
+          className="min-w-0 flex-1 truncate bg-transparent text-base outline-none placeholder:text-muted sm:text-sm"
         />
-        <Search size={16} className="text-muted" />
+        <Search size={16} className="shrink-0 text-muted" />
       </div>
 
       {open && q && (
