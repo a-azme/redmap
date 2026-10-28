@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import {
   Mountain, Layers, Gem, Hexagon, Thermometer, Wind,
-  Crosshair, RotateCcw, ExternalLink, TrendingUp, MapPin,
+  ExternalLink, TrendingUp, MapPin,
 } from 'lucide-react'
 import MarsGlobe from '../components/map/MarsGlobe'
 import LayerThumb from '../components/map/LayerThumb'
@@ -72,11 +72,11 @@ function Switch({ on, onClick }) {
         onClick()
       }}
       aria-label="toggle layer"
-      className={`relative h-6 w-11 shrink-0 rounded-full transition ${on ? 'bg-red-500' : 'bg-white/20'}`}
+      className={`relative h-5 w-9 shrink-0 rounded-full transition ${on ? 'bg-red-500' : 'bg-white/20'}`}
     >
       <span
-        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
-          on ? 'left-[22px]' : 'left-0.5'
+        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
+          on ? 'left-[18px]' : 'left-0.5'
         }`}
       />
     </button>
@@ -96,43 +96,86 @@ export default function LayersPage() {
     <div className="relative h-full overflow-y-auto bg-bg text-white xl:overflow-hidden">
       {/* Globe + everything that sits on top of it */}
       <div className="relative h-[75vh] min-h-[460px] xl:absolute xl:inset-0 xl:h-auto xl:min-h-0">
-        <MarsGlobe locations={LOCATIONS} focus={selected} onSelect={pick} layer={active} />
+        <MarsGlobe
+          locations={LOCATIONS}
+          focus={selected}
+          onSelect={pick}
+          layer={active}
+          onCenter={() => pick({ ...selected })}
+          onReset={() => pick(LOCATIONS[0])}
+          controlsClassName="right-3 top-3 xl:right-[306px] xl:top-4"
+          legendClassName="bottom-24 left-1/2 -translate-x-1/2 xl:bottom-28"
+        />
 
-        {/* Left: Map Layers (desktop only) */}
-        <aside className={`absolute left-4 top-4 z-[1100] hidden w-[300px] p-2 xl:block ${panel}`}>
-          {/* KEEP your existing content of this aside (title + LAYERS.map) */}
+        {/* Left: Map Layers (desktop only, concise) */}
+        <aside className={`absolute left-4 top-4 z-[1100] hidden w-[250px] p-2.5 xl:block ${panel}`}>
+          <div className="flex items-center gap-2 px-2 py-1.5 font-semibold text-sm">
+            <Layers size={16} /> Map Layers
+          </div>
+          <div className="mt-1 space-y-1">
+            {LAYERS.map((l) => {
+              const Icon = l.icon
+              const on = active === l.id
+              return (
+                <div
+                  key={l.id}
+                  onClick={() => setActive(l.id)}
+                  className={`flex cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-1.5 transition hover:bg-white/5 ${
+                    on ? 'bg-red-500/10' : ''
+                  }`}
+                >
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/10">
+                    <Icon size={15} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-medium leading-tight">{l.name}</div>
+                    <div className="truncate text-[10px] text-gray-400">{l.sub}</div>
+                  </div>
+                  <Switch on={on} onClick={() => toggleLayer(l.id)} />
+                </div>
+              )
+            })}
+          </div>
         </aside>
 
         {/* Compass (desktop only) */}
-        <div className="absolute left-[330px] top-4 z-[1100] hidden h-20 w-20 items-center justify-center rounded-full border border-white/10 bg-black/60 backdrop-blur-md xl:flex">
-          {/* KEEP your existing N/S/W/E spans + arrow */}
+        <div className="absolute left-[272px] top-4 z-[1100] hidden h-16 w-16 items-center justify-center rounded-full border border-white/10 bg-black/60 backdrop-blur-md xl:flex">
+          <span className="absolute top-1 text-[9px] text-gray-300">N</span>
+          <span className="absolute bottom-1 text-[9px] text-gray-300">S</span>
+          <span className="absolute left-1.5 text-[9px] text-gray-300">W</span>
+          <span className="absolute right-1.5 text-[9px] text-gray-300">E</span>
+          <div className="h-0 w-0 border-x-[6px] border-b-[18px] border-x-transparent border-b-red-500" />
         </div>
 
         {/* Location tooltip */}
-        <div className={`absolute left-1/2 top-3 z-[1100] -translate-x-1/2 whitespace-nowrap px-3 py-2 xl:top-6 xl:px-4 xl:py-3 ${panel}`}>
-          {/* KEEP your existing content */}
+        <div className={`absolute left-1/2 top-3 z-[1050] -translate-x-1/2 whitespace-nowrap px-3 py-1.5 xl:top-4 xl:px-3.5 xl:py-2 ${panel}`}>
+          <div className="flex items-center gap-2 text-xs font-semibold xl:text-sm">
+            <MapPin size={14} style={{ color: selected.color }} /> {selected.name}
+          </div>
+          <div className="mt-0.5 text-[11px] text-gray-400">
+            {selected.lat}° N, {selected.lon}° E
+          </div>
+          <div className="text-[11px] text-gray-400">Elevation: {selected.elevation} km</div>
         </div>
 
-        {/* Right action buttons */}
-        <div className="absolute right-3 top-[112px] z-[1100] flex flex-col gap-2 xl:right-[400px] xl:top-4">
-          {/* KEEP your two buttons */}
-        </div>
-
-        {/* Bottom: layer thumbnails */}
-        <div className={`absolute bottom-2 left-2 right-2 z-[1100] flex gap-2 overflow-x-auto p-2 xl:bottom-4 xl:left-4 xl:right-4 xl:gap-3 xl:p-3 ${panel}`}>
+        {/* Bottom: layer thumbnails (responsively bottom center) */}
+        <div
+          className={`absolute bottom-3 left-1/2 -translate-x-1/2 z-[1000] flex max-w-[calc(100vw-32px)] xl:max-w-[calc(100vw-620px)] items-center gap-2 overflow-x-auto p-2 [scrollbar-width:none] xl:bottom-4 xl:gap-2.5 xl:p-2.5 ${panel}`}
+        >
           {LAYERS.map((l) => {
             const Icon = l.icon
             return (
               <button
                 key={l.id}
                 onClick={() => setActive(l.id)}
-                className={`w-[130px] shrink-0 overflow-hidden rounded-xl border text-left transition xl:w-[180px] ${
-                  active === l.id ? 'border-red-500' : 'border-white/10 hover:border-white/30'
+                className={`w-[100px] shrink-0 overflow-hidden rounded-xl border text-left transition xl:w-[115px] ${
+                  active === l.id ? 'border-red-500 ring-1 ring-red-500/50' : 'border-white/10 hover:border-white/30'
                 }`}
               >
                 <LayerThumb layerId={l.id} grad={l.grad} />
-                <div className="flex items-center gap-2 px-3 py-2 text-sm">
-                  <Icon size={14} /> {l.name.replace('Geological Features', 'Geological')}
+                <div className="flex items-center gap-1.5 px-2 py-1.5 text-xs">
+                  <Icon size={13} className="shrink-0" />
+                  <span className="truncate">{l.name.replace('Geological Features', 'Geological')}</span>
                 </div>
               </button>
             )
@@ -140,9 +183,81 @@ export default function LayersPage() {
         </div>
       </div>
 
-      {/* Right: details (below the globe on mobile) */}
-      <aside className={`relative z-[1100] m-2 p-4 xl:absolute xl:bottom-[132px] xl:right-4 xl:top-4 xl:m-0 xl:w-[370px] xl:overflow-y-auto xl:p-5 ${panel}`}>
-        {/* KEEP everything inside your existing details aside */}
+      {/* Right: details (below the globe on mobile, concise on desktop above bottom bar) */}
+      <aside className={`relative z-[1100] m-2 p-4 xl:absolute xl:bottom-[120px] xl:right-4 xl:top-4 xl:m-0 xl:w-[280px] xl:overflow-y-auto xl:p-3.5 ${panel}`}>
+        <div className="flex gap-3">
+          <div
+            className="h-16 w-16 shrink-0 rounded-xl"
+            style={{ background: `linear-gradient(135deg, ${selected.color}, #1a0b08)` }}
+          />
+          <div className="min-w-0 flex-1">
+            <h2 className="text-base font-bold leading-tight">{selected.name}</h2>
+            <div className="text-xs text-gray-400">
+              {selected.lat}° N, {selected.lon}° E
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {selected.tags.map((t) => (
+                <span key={t} className="rounded-md bg-white/10 px-1.5 py-0.5 text-[10px] text-gray-200">
+                  {t}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <p className="mt-3 border-b border-white/10 pb-3 text-xs leading-relaxed text-gray-300">{selected.desc}</p>
+
+        <h3 className="mt-3 text-xs font-semibold text-gray-200">Terrain &amp; Elevation</h3>
+        <div className="mt-2 space-y-2 text-xs">
+          {[
+            ['Terrain Type', selected.terrain, Mountain],
+            ['Elevation', `${selected.elevation} km`, TrendingUp],
+            ['Avg. Slope', `${selected.slope}°`, TrendingUp],
+            ['Temperature (est.)', `${selected.temp}°C`, Thermometer],
+          ].map(([label, value, Icon]) => (
+            <div key={label} className="flex items-center gap-2.5">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/10">
+                <Icon size={14} />
+              </div>
+              <div className="min-w-0">
+                <div className="text-[10px] text-gray-400">{label}</div>
+                <div className="font-medium text-xs">{value}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <h3 className="mt-3 border-t border-white/10 pt-3 text-xs font-semibold text-gray-200">Related Missions</h3>
+        <div className="mt-2 flex gap-2.5">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[8px] font-bold">
+            NASA
+          </div>
+          <div className="min-w-0">
+            <div className="text-xs font-medium">{selected.mission.name}</div>
+            <div className="text-[10px] text-gray-400">({selected.mission.years})</div>
+            <div className="mt-0.5 text-[10px] leading-tight text-gray-400">{selected.mission.note}</div>
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {LOCATIONS.map((l) => (
+            <button
+              key={l.id}
+              onClick={() => pick(l)}
+              className={`rounded-full border px-2.5 py-0.5 text-[11px] transition ${
+                selected.id === l.id
+                  ? 'border-red-500 bg-red-500/20 text-white'
+                  : 'border-white/10 text-gray-400 hover:text-white'
+              }`}
+            >
+              {l.name}
+            </button>
+          ))}
+        </div>
+
+        <button className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl border border-white/10 py-2 text-xs font-medium hover:bg-white/10">
+          View More Details <ExternalLink size={13} />
+        </button>
       </aside>
     </div>
   )

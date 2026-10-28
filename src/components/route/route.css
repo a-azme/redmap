@@ -11,7 +11,7 @@
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 14px;
-  backdrop-filter: blur(10px);
+  user-select: none; /* dragging the map over a card should pan, not select text */
   font-family: system-ui, sans-serif;
   font-size: 14px;
 }
@@ -23,9 +23,13 @@
 /* ============ overlay layout (matches the mockup) ============ */
 .rm-layout { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
 .rm-layout > * { pointer-events: auto; position: absolute; }
+/* the wrappers must not catch drags on the gaps between cards; only the cards themselves do */
+.rm-layout .rm-bottom, .rm-layout .rm-right { pointer-events: none; }
+.rm-layout .rm-bottom > *, .rm-layout .rm-right > * { pointer-events: auto; }
+.rm-panel input, .rm-panel select, .rm-panel textarea, .rm-card input, .rm-card select, .rm-card textarea { user-select: text; }
 .rm-layout .rm-panel { top: 16px; left: 16px; }
 .rm-layout .rm-right { top: 16px; right: 16px; width: 330px; display: flex; flex-direction: column; gap: 10px; max-height: calc(100% - 32px); overflow-y: auto; }
-.rm-layout .rm-bottom { bottom: 16px; left: 332px; right: 362px; display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; }
+.rm-layout .rm-bottom { bottom: 16px; left: 332px; right: 362px; display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; align-items: end; }
 .rm-layout .rm-viewtoggle { top: 16px; left: 50%; transform: translateX(-50%); }
 
 /* ============ panel ============ */
@@ -72,10 +76,16 @@
 .rm-risk { font-size: 11.5px; padding: 3px 10px; border-radius: 99px; font-weight: 600; white-space: nowrap; }
 .rm-risk--low { background: rgba(46, 204, 113, .18); color: #4be08a; }
 .rm-risk--moderate { background: rgba(245, 165, 36, .18); color: var(--amber); }
+.rm-risk--min { border: 1px dashed currentColor; }
+.rm-overview__banner { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.4; background: rgba(245, 165, 36, .12); border: 1px solid rgba(245, 165, 36, .4); color: var(--amber); }
 .rm-risk--high { background: rgba(226, 59, 46, .22); color: #ff7b72; }
 .rm-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 16px; margin: 8px 0 0; }
 .rm-stats dt { color: var(--muted); font-size: 11.5px; }
 .rm-stats dd { margin: 0; font-weight: 700; }
+.rm-source { margin: 8px 0 0; font-size: 11.5px; }
+.rm-source--real { color: #4be08a; }
+.rm-source--sim { color: var(--amber); }
+.rm-plan:disabled { opacity: .65; cursor: progress; filter: none; }
 
 /* ============ elevation profile ============ */
 .rm-profile__svg { width: 100%; height: auto; display: block; touch-action: pan-y; }
@@ -229,4 +239,97 @@
   .rm-ctrls { top: auto; bottom: 14px; right: 10px; }
   .rm-status { top: auto; bottom: 10px; left: 10px; right: 64px; transform: none; min-width: 0; max-width: none; }
   .rm-axis { font-size: 13px; }
+}
+
+/* ---- EVA timeline ---- */
+.rm-eva__controls { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.rm-eva__controls input[type="date"] { background: var(--line); color: var(--text); border: 1px solid transparent; border-radius: 8px; padding: 6px 8px; color-scheme: dark; }
+.rm-eva__env { grid-template-columns: repeat(3, 1fr); }
+.rm-eva__env small { display: block; margin: 0; }
+.rm-eva__warns { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.rm-eva__warns .rm-warn { display: flex; gap: 8px; }
+.rm-eva__warns p { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+.rm-eva__sols { list-style: none; margin: 10px 0 0; padding: 0 4px 0 0; max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.rm-eva__row { display: grid; grid-template-columns: 52px 1fr auto auto; gap: 8px; font-size: 12.5px; }
+.rm-eva__row span { color: var(--muted); }
+.rm-eva__bar { position: relative; height: 8px; margin-top: 4px; border-radius: 4px; background: rgba(255, 255, 255, .06); overflow: hidden; }
+.rm-eva__day { position: absolute; top: 0; bottom: 0; background: rgba(245, 165, 36, .28); }
+.rm-eva__walk { position: absolute; top: 1px; bottom: 1px; border-radius: 3px; background: var(--red); }
+.rm-eva__export { display: flex; gap: 8px; margin-top: 8px; }
+
+/* ---- route comparison ---- */
+.rm-compare table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.rm-compare th, .rm-compare td { padding: 4px 3px; text-align: right; border-top: 1px solid var(--line); }
+.rm-compare thead th { border-top: 0; padding-bottom: 6px; }
+.rm-compare td:first-child { text-align: left; color: var(--muted); }
+.rm-compare td.is-active { font-weight: 700; background: rgba(255, 255, 255, .04); }
+.rm-compare__mode { display: inline-flex; align-items: center; gap: 5px; background: var(--line); color: var(--text); border: 1px solid transparent; border-radius: 8px; padding: 4px 6px; font-size: 11.5px; cursor: pointer; }
+.rm-compare__mode i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.rm-compare__mode.is-active { border-color: var(--red); background: rgba(226, 59, 46, .18); }
+.rm-compare__mode:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ---- waypoints ---- */
+.rm-waypoints ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; max-height: 200px; overflow-y: auto; }
+.rm-waypoints li { display: flex; gap: 10px; align-items: flex-start; font-size: 12.5px; }
+.rm-waypoints small { display: block; color: var(--muted); font-size: 11.5px; }
+.rm-wp__n { flex: 0 0 22px; height: 22px; border-radius: 50%; background: #f5c518; color: #1a1a1a; font-weight: 700; font-size: 11.5px; display: grid; place-items: center; }
+.rm-wp__n--start { background: #2ecc71; }
+.rm-wp__n--end { background: var(--red); color: #fff; }
+
+/* ---- source chips ---- */
+.rm-src-chip { display: inline-block; font-size: 9.5px; font-weight: 700; letter-spacing: .04em; padding: 1px 6px; border-radius: 99px; vertical-align: middle; cursor: help; text-decoration: none; white-space: nowrap; }
+.rm-src-chip--data { background: rgba(43, 181, 245, .16); color: #7fd4ff; border: 1px solid rgba(43, 181, 245, .4); }
+.rm-src-chip--model { background: transparent; color: var(--amber); border: 1px dashed rgba(245, 165, 36, .6); }
+.rm-stats dt .rm-src-chip, .rm-eva__env dt .rm-src-chip { margin-left: 5px; }
+
+/* ---- why this route ---- */
+.rm-why__table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.rm-why__table th, .rm-why__table td { padding: 4px 3px; text-align: right; border-top: 1px solid var(--line); }
+.rm-why__table thead th { border-top: 0; color: var(--muted); font-weight: 600; font-size: 11.5px; }
+.rm-why__table td:first-child { text-align: left; color: var(--muted); }
+.rm-why__list { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.rm-why__list li { display: flex; gap: 10px; align-items: flex-start; font-size: 12.5px; }
+.rm-why__list small { color: var(--muted); }
+.rm-why__layers { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.rm-legend__bar { height: 8px; border-radius: 4px; }
+.rm-legend__labels { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+
+.rm-modes { flex-wrap: wrap; }
+.rm-wp__n--cp { background: #4fc3f7; width: 16px; height: 16px; flex-basis: 16px; font-size: 9px; margin: 3px; }
+.rm-why__alert { color: #ff8a80; }
+.rm-swatches { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 11px; color: var(--muted); }
+.rm-swatches li { display: flex; align-items: center; gap: 5px; }
+.rm-swatches i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+
+.rm-riskbars { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 8px; }
+.rm-riskbars li { display: grid; grid-template-columns: 1fr 90px 34px; gap: 8px; align-items: center; font-size: 12.5px; }
+.rm-riskbars small { display: block; color: var(--muted); font-size: 11px; }
+.rm-riskbar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.08); overflow: hidden; }
+.rm-riskbar i { display: block; height: 100%; background: #f5a524; }
+.rm-riskbars b { text-align: right; font-size: 12px; }
+.rm-legrisk { list-style: none; margin: 4px 0; padding: 0; font-size: 12.5px; display: grid; gap: 4px; }
+.rm-legrisk small { color: var(--muted); margin-left: 4px; }
+.rm-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.rm-dot--low { background: #4be08a; } .rm-dot--moderate { background: #f5a524; } .rm-dot--high { background: #ff4d4d; }
+
+/* ============ full-screen map view ============ */
+.rm-page.is-focus .rm-panel, .rm-page.is-focus .rm-right, .rm-page.is-focus .rm-bottom { display: none; }
+.rm-page.is-focus .rm-ctrls { right: 16px; }
+.rm-focuschip { left: 16px; bottom: 16px; display: grid; gap: 2px; padding: 10px 14px; border-radius: 12px; max-width: min(420px, calc(100% - 32px));
+  background: rgba(12, 14, 20, .88); border: 1px solid rgba(255,255,255,.09); color: #f1f1f4; font-size: 13px; user-select: none; }
+.rm-focuschip span { color: #9aa0ad; font-size: 12px; }
+
+/* ============ dark glass for the view toggles (only these; the cards stay solid so their text is easy to read) ============ */
+.rm-viewtoggle {
+  background: rgba(14, 16, 22, .42);
+  -webkit-backdrop-filter: blur(12px) saturate(120%);
+  backdrop-filter: blur(12px) saturate(120%);
+  border: 1px solid rgba(255, 255, 255, .12);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .3);
+}
+.rm-viewtoggle button { transition: background .15s ease; }
+.rm-viewtoggle button:hover:not(.is-active) { background: rgba(255, 255, 255, .08); }
+.rm-viewtoggle button.is-active { background: rgba(226, 59, 46, .85); }
+@supports not (backdrop-filter: blur(1px)) {
+  .rm-viewtoggle { background: rgba(12, 14, 20, .88); }
 }

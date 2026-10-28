@@ -1,7 +1,14 @@
 [
-  { "id": "delta", "name": "Jezero Delta Front", "lat": 18.48, "lon": 77.35, "note": "Ancient river delta, prime target for signs of past life" },
-  { "id": "seitah", "name": "Seitah Formation", "lat": 18.4, "lon": 77.2, "note": "Layered rock with possible igneous history" },
-  { "id": "carbonates", "name": "Carbonate Outcrop", "lat": 20.3, "lon": 75.4, "note": "Carbonate minerals that form in water" },
-  { "id": "clay", "name": "Clay Outcrop", "lat": 19.4, "lon": 76.2, "note": "Clay minerals that preserve organic material" },
-  { "id": "isidis", "name": "Isidis Basin Rim", "lat": 17.6, "lon": 79.5, "note": "Ancient impact basin rim" }
+  { "id": "delta", "name": "Jezero Delta Front", "lat": 18.48, "lon": 77.35, "note": "Ancient river delta, prime target for signs of past life", "source": "MRO HiRISE / Perseverance Mastcam-Z" },
+  { "id": "seitah", "name": "Seitah Formation", "lat": 18.4, "lon": 77.2, "note": "Layered rock with possible igneous history", "source": "Perseverance SuperCam" },
+  { "id": "carbonates", "name": "Carbonate Outcrop", "lat": 20.3, "lon": 75.4, "note": "Carbonate minerals that form in water", "source": "MRO CRISM" },
+  { "id": "clay", "name": "Clay Outcrop", "lat": 19.4, "lon": 76.2, "note": "Clay minerals that preserve organic material", "source": "MRO CRISM" },
+  { "id": "isidis", "name": "Isidis Basin Rim", "lat": 17.6, "lon": 79.5, "note": "Ancient impact basin rim", "source": "MRO CTX" },
+  { "id": "neretva", "name": "Neretva Vallis inlet", "lat": 18.6, "lon": 77.1, "note": "Ancient river valley that once carried water into Jezero lake", "source": "MRO CTX / HiRISE" },
+  { "id": "nili-troughs", "name": "Nili Fossae troughs", "lat": 20.9, "lon": 74.7, "note": "Exposed carbonate, clay and olivine-rich rocks that record early water-rich conditions", "source": "MRO CRISM" },
+  { "id": "rems", "name": "Gale weather station", "lat": -4.59, "lon": 137.44, "note": "Curiosity's weather instrument tracks daily and seasonal pressure, temperature and humidity here", "source": "Curiosity REMS" },
+  { "id": "yellowknife", "name": "Yellowknife Bay", "lat": -4.62, "lon": 137.49, "note": "Ancient lakebed where Curiosity found conditions that could have supported microbial life", "source": "Curiosity CheMin / SAM" },
+  { "id": "bagnold", "name": "Bagnold Dunes", "lat": -4.9, "lon": 137.3, "note": "Active dunes where wind-driven sand movement on Mars can be studied up close", "source": "Curiosity Mastcam" },
+  { "id": "sharp-layers", "name": "Clay-to-sulfate layers", "lat": -5.0, "lon": 137.62, "note": "Mount Sharp's layers shift from clay-rich to sulfate-rich rock, a record of Mars drying out", "source": "MRO CRISM / Curiosity CheMin" },
+  { "id": "sharp-upper", "name": "Mount Sharp upper layers", "lat": -5.08, "lon": 137.85, "note": "A tall stack of layered rock holding the youngest part of Gale's history", "source": "MRO HiRISE" }
 ]

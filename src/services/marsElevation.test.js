@@ -1,0 +1,165 @@
+// Tests the NASA tile sampler against a fake tile server (no network needed).
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { createMarsTerrain, heightFromSnapshot, ANCHORS } from './marsElevation.js'
+import { planRealRoute } from '../lib/realRoute.js'
+import { createWorkerHandler } from '../workers/routeWorkerCore.js'
+import { haversineKm } from '../lib/routeAnalysis.js'
+
+// Smooth fake planet: heights blend towards the nearest anchor's known height.
+const trueElev = (lat, lon) => {
+  let num = 0, den = 1e-9
+  for (const a of ANCHORS) {
+    const d = haversineKm({ lat, lon }, a)
+    const w = Math.exp(-(d * d) / (2 * 400 * 400))
+    num += w * a.km; den += w
+  }
+  return den > 1e-6 ? num / den : -2
+}
+// 8-bit encoding with an arbitrary stretch the code must discover on its own
+const encode = (km) => Math.max(0, Math.min(255, Math.round(((km + 9.5) / 32) * 255)))
+
+function fakeServer({ colorful = false, missing = () => false } = {}) {
+  const calls = { n: 0 }
+  const loadTile = async (z, x, y) => {
+    calls.n++
+    if (missing(z, x, y)) return null
+    const cols = 2 ** (z + 1), rows = 2 ** z
+    const gray = new Uint8Array(65536), alpha = new Uint8Array(65536).fill(255)
+    for (let py = 0; py < 256; py++) {
+      const lat = 90 - ((y * 256 + py + 0.5) / (rows * 256)) * 180
+      for (let px = 0; px < 256; px++) {
+        const lon = ((x * 256 + px + 0.5) / (cols * 256)) * 360 // 0..360 east
+        gray[py * 256 + px] = encode(trueElev(lat, lon))
+      }
+    }
+    return { gray, alpha, colorful }
+  }
+  return { loadTile, calls }
+}
+
+// The fake above indexes longitude 0..360; real tiles start at -180, so shift columns by half the world.
+function fakeServerStd(opts) {
+  const base = fakeServer(opts)
+  const loadTile = async (z, x, y) => {
+    const cols = 2 ** (z + 1)
+    return base.loadTile(z, (x + cols / 2) % cols, y)
+  }
+  return { loadTile, calls: base.calls }
+}
+
+test('calibrates against known site heights and recovers elevations', async () => {
+  const srv = fakeServerStd()
+  const t = createMarsTerrain({ loadTile: srv.loadTile })
+  const cal = await t.calibrate()
+  assert.equal(cal.ok, true, cal.reason)
+  assert.ok(cal.r2 > 0.95)
+  const terrain = await t.prepareTerrain({
+    bounds: { lonMin: 74, lonMax: 81, latMin: 16, latMax: 23 }, cellKm: 1,
+  })
+  assert.equal(terrain.source.real, true)
+  const h = terrain.heightAt(18.44, 77.45)
+  assert.ok(Math.abs(h - trueElev(18.44, 77.45)) < 0.4, `height ${h}`)
+})
+
+test('plans a full route on the fake NASA tiles', async () => {
+  const t = createMarsTerrain({ loadTile: fakeServerStd().loadTile })
+  const nili = { id: 'nili', name: 'Nili', lat: 21.0, lon: 74.5 }
+  const jez = { id: 'jez', name: 'Jezero', lat: 18.435, lon: 77.527 }
+  const r = await planRealRoute(nili, jez, { mode: 'fastest', maxSlopeDeg: 15, avoidRough: true, showScience: false, evaHoursPerSol: 6 }, { prepareTerrain: t.prepareTerrain })
+  assert.equal(r.dataSource.real, true)
+  assert.ok(r.points.every((p) => Number.isFinite(p.elevKm)))
+})
+
+test('rejects colour (non-elevation) tiles', async () => {
+  const t = createMarsTerrain({ loadTile: fakeServerStd({ colorful: true }).loadTile })
+  const cal = await t.calibrate()
+  assert.equal(cal.ok, false)
+  await assert.rejects(t.prepareTerrain({ bounds: { lonMin: 74, lonMax: 81, latMin: 16, latMax: 23 }, cellKm: 1 }))
+})
+
+test('rejects tiles that do not match known heights', async () => {
+  const noise = async () => {
+    const gray = new Uint8Array(65536).map(() => Math.floor(Math.random() * 256))
+    return { gray, alpha: new Uint8Array(65536).fill(255), colorful: false }
+  }
+  const cal = await createMarsTerrain({ loadTile: noise }).calibrate()
+  assert.equal(cal.ok, false)
+})
+
+test('fails cleanly when the tile server is unreachable', async () => {
+  const t = createMarsTerrain({ loadTile: async () => null })
+  const cal = await t.calibrate()
+  assert.equal(cal.ok, false)
+})
+
+test('tiles are cached, so planning several routes loads each tile once', async () => {
+  const srv = fakeServerStd()
+  const t = createMarsTerrain({ loadTile: srv.loadTile })
+  const b = { bounds: { lonMin: 74, lonMax: 81, latMin: 16, latMax: 23 }, cellKm: 1 }
+  await t.prepareTerrain(b)
+  const after1 = srv.calls.n
+  await t.prepareTerrain(b)
+  await t.prepareTerrain(b)
+  assert.equal(srv.calls.n, after1)
+})
+
+test('steps down to a shallower zoom when the server has fewer levels than expected', async () => {
+  const srv = fakeServerStd()
+  const seen = []
+  const loadTile = async (z, x, y) => { seen.push(z); return z > 4 ? null : srv.loadTile(z, x, y) } // levels 5 and 6 do not exist
+  const t = createMarsTerrain({ loadTile })
+  const terrain = await t.prepareTerrain({ bounds: { lonMin: 74, lonMax: 78, latMin: 17, latMax: 21 }, cellKm: 0.8 })
+  assert.equal(terrain.source.real, true)
+  assert.equal(terrain.source.zoom, 4)
+  assert.ok(Math.abs(terrain.heightAt(18.44, 77.45) - trueElev(18.44, 77.45)) < 0.6)
+  // and it remembers, so the next trip does not ask for the missing levels again
+  seen.length = 0
+  await t.prepareTerrain({ bounds: { lonMin: 80, lonMax: 84, latMin: 5, latMax: 9 }, cellKm: 0.8 })
+  assert.ok(seen.every((z) => z <= 4), `asked for zoom ${Math.max(...seen)}`)
+})
+
+test('a plain-data snapshot of the terrain gives the same heights and the same route, and survives a worker hop', async () => {
+  const t = createMarsTerrain({ loadTile: fakeServerStd().loadTile })
+  const nili = { id: 'nili', name: 'Nili', lat: 21.0, lon: 74.5 }
+  const jez = { id: 'jez', name: 'Jezero', lat: 18.435, lon: 77.527 }
+  const spec = { bounds: { lonMin: 72, lonMax: 80, latMin: 16, latMax: 23 }, cellKm: 1 }
+  const terrain = await t.prepareTerrain(spec)
+  const snap = structuredClone(terrain.snapshot) // what postMessage does
+  const h = heightFromSnapshot(snap)
+  for (const [la, lo] of [[18.4, 77.5], [21, 74.5], [19.2, 76.1]]) assert.equal(h(la, lo), terrain.heightAt(la, lo))
+  const settings = { mode: 'safest', maxSlopeDeg: 15, avoidRough: true, showScience: false, evaHoursPerSol: 6 }
+  const direct = await planRealRoute(nili, jez, settings, { prepareTerrain: async () => terrain })
+  const viaSnap = await planRealRoute(nili, jez, settings, { prepareTerrain: async () => ({ heightAt: h, source: terrain.source }) })
+  assert.equal(viaSnap.distanceKm, direct.distanceKm)
+  const back = structuredClone(viaSnap) // the route has to cross the worker boundary too
+  assert.equal(back.points.length, viaSnap.points.length)
+  assert.deepEqual(back.warnings.map((w) => w.title), viaSnap.warnings.map((w) => w.title))
+})
+
+test('the planning worker protocol: it asks for terrain, plans on it, and returns a route that can be sent back', async () => {
+  const t = createMarsTerrain({ loadTile: fakeServerStd().loadTile })
+  const nili = { id: 'nili', name: 'Nili', lat: 21.0, lon: 74.5 }
+  const jez = { id: 'jez', name: 'Jezero', lat: 18.435, lon: 77.527 }
+  const asked = []
+  const requestTerrain = async (spec) => {
+    asked.push(spec)
+    const terrain = await t.prepareTerrain(spec)
+    return structuredClone({ snapshot: terrain.snapshot, source: terrain.source }) // what postMessage does
+  }
+  const handle = createWorkerHandler({ pois: [], requestTerrain })
+  const msg = (id, extra = {}) => structuredClone({ id, start: nili, end: jez, settings: { mode: 'fastest', maxSlopeDeg: 15, avoidRough: true, showScience: false, evaHoursPerSol: 6, ...extra } })
+  const first = await handle(msg(1))
+  assert.equal(first.id, 1)
+  assert.ok(first.route && first.route.distanceKm > 100, JSON.stringify(first.error))
+  structuredClone(first) // must be sendable back with postMessage
+  assert.equal(asked.length, 1)
+  const second = await handle(msg(2, { mode: 'safest' })) // same trip, another mode: the terrain is not asked for again
+  assert.ok(second.route)
+  assert.equal(asked.length, 1)
+  const hops = await handle(msg(3, { hops: true })) // a short trip is not split into hops
+  assert.ok(hops.route && !hops.route.dataSource.hops)
+  const broken = createWorkerHandler({ pois: [], requestTerrain: async () => { throw new Error('tiles unavailable') } })
+  const lost = await broken(msg(4))
+  assert.match(lost.error.message, /tiles unavailable/)
+})

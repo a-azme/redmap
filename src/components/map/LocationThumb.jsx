@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { TILE_LAYERS } from '../../services/layerService'
 
 // Prottek location er jonno zoom level (boro feature e kom zoom)
-const ZOOM = { jezero: 5, nili: 5, tyrrhena: 4, isidis: 3, olympus: 3, valles: 3 }
+const ZOOM = { jezero: 5, nili: 5, tyrrhena: 4, isidis: 3, olympus: 3, valles: 3, butler: 5, delta: 5, neretva: 5, syrtis: 4 }
 
 const TILE = 256
 const OUT = 160 // thumbnail pixel size
