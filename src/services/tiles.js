@@ -183,12 +183,19 @@ export function applyLayer(viewer, cfg, key, cb) {
   const FADE_ZERO = 9e5
   const fadeOverlays = () => {
     if (viewer.isDestroyed() || overlayLayers.length === 0) return
-    const h = viewer.camera.positionCartographic.height
+    const mode = viewer.scene.mode
+    if (mode === Cesium.SceneMode.MORPHING) return
+    const h =
+      mode === Cesium.SceneMode.SCENE2D
+        ? viewer.camera.getMagnitude()
+        : (viewer.camera.positionCartographic?.height ?? Infinity)
     const a = Math.min(1, Math.max(0, (FADE_ZERO - h) / (FADE_ZERO - FADE_FULL)))
-    overlayLayers.forEach((l) => {
-      l.alpha = a
-      l.show = a > 0
-    })
+    const show = a > 0
+    for (let i = 0; i < overlayLayers.length; i++) {
+      const l = overlayLayers[i]
+      if (l.show !== show) l.show = show
+      if (show && Math.abs(l.alpha - a) > 0.01) l.alpha = a
+    }
   }
   viewer.scene.preRender.addEventListener(fadeOverlays)
 
