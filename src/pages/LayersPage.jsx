@@ -5,7 +5,6 @@ import {
 } from 'lucide-react'
 import MarsGlobe from '../components/map/MarsGlobe'
 import LayerThumb from '../components/map/LayerThumb'
-import LocationThumb from '../components/map/LocationThumb'
 import { useMapStore } from '../store/useMapStore'
 
 const LOCATIONS = [
@@ -98,7 +97,7 @@ export default function LayersPage() {
       <div className="relative h-[75vh] min-h-[460px] xl:absolute xl:inset-0 xl:h-auto xl:min-h-0">
         <MarsGlobe
           locations={LOCATIONS}
-          focus={selected}
+          focus={storeSelected}
           onSelect={pick}
           layer={active}
           onCenter={() => pick({ ...selected })}

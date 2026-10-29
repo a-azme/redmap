@@ -27,10 +27,10 @@ export default function SearchBar() {
   }, [])
 
   const choose = (loc) => {
-    setSelected(loc)
     setQuery('')
     setOpen(false)
     navigate('/')
+    setTimeout(() => setSelected(loc), 0)
   }
 
   return (

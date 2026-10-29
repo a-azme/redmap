@@ -7,6 +7,50 @@ import { MARS, at, applyLayer, guardCesiumViewer } from '../../services/tiles'
 
 window.CESIUM_BASE_URL = '/cesium/'
 
+const ORBIT_HEIGHT = 8.0e6
+const FULL_NAME_MAX_HEIGHT = 6.0e6
+const ABBREV_MAX_HEIGHT = 1.1e7
+
+function getAbbrev(name) {
+  if (!name) return ''
+  const words = name
+    .replace(/\b[A-Z]\.\s*/g, '')
+    .split(/[\s-]+/)
+    .filter(Boolean)
+  if (words.length === 1) return words[0].slice(0, 3).toUpperCase()
+  return words.map((w) => w[0]?.toUpperCase() || '').join('')
+}
+
+function getCameraZoomHeight(viewer) {
+  if (!viewer || viewer.isDestroyed()) return ORBIT_HEIGHT
+  if (viewer.scene.mode === Cesium.SceneMode.SCENE2D) {
+    const f = viewer.camera.frustum
+    if (f && typeof f.top === 'number' && typeof f.bottom === 'number') {
+      return Math.abs(f.top - f.bottom)
+    }
+    return viewer.camera.getMagnitude()
+  }
+  return viewer.camera.positionCartographic?.height ?? ORBIT_HEIGHT
+}
+
+// Computes a 2D Rectangle whose aspect ratio is narrower than or equal to the canvas aspect ratio
+// so Cesium fits the vertical latitude span to 100% of the viewport height (covering the background).
+function get2DFillRect(viewer, centerLon = 77) {
+  const cw = viewer?.canvas?.clientWidth || 1200
+  const ch = viewer?.canvas?.clientHeight || 800
+  const aspect = Math.max(0.4, Math.min(2.4, cw / ch))
+  const latHalf = 68
+  const lonHalf = Math.min(95, latHalf * aspect * 0.92)
+  const normLon = ((centerLon + 180) % 360 + 360) % 360 - 180
+  const clampedCenter = Math.max(-180 + lonHalf, Math.min(180 - lonHalf, normLon))
+  return Cesium.Rectangle.fromDegrees(
+    clampedCenter - lonHalf,
+    -latHalf,
+    clampedCenter + lonHalf,
+    latHalf
+  )
+}
+
 // Persistent singleton Cesium.Viewer so switching between Explore, Layers, and Missions
 // re-parents the existing WebGL canvas instead of destroying and recreating the context.
 let sharedGlobe = null
@@ -31,8 +75,14 @@ function getSharedGlobe() {
     selectionIndicator: false,
     skyBox: false,
     skyAtmosphere: false,
+    orderIndependentTranslucency: false,
     mapProjection: new Cesium.GeographicProjection(MARS),
     mapMode2D: Cesium.MapMode2D.INFINITE_SCROLL,
+    contextOptions: {
+      webgl: {
+        alpha: true,
+      },
+    },
   })
 
   // Phone / retina screen e blur na hoy: device er asol pixel density use kori
@@ -40,7 +90,7 @@ function getSharedGlobe() {
   viewer.resolutionScale = Math.min(window.devicePixelRatio || 1, 2)
 
   const scene = viewer.scene
-  scene.backgroundColor = Cesium.Color.fromCssColorString('#07090d')
+  scene.backgroundColor = Cesium.Color.TRANSPARENT
   scene.globe.baseColor = Cesium.Color.fromCssColorString('#2a1208')
   scene.globe.showGroundAtmosphere = false
   scene.globe.enableLighting = false
@@ -58,7 +108,10 @@ function getSharedGlobe() {
   ctrl.minimumZoomDistance = 500
   ctrl.maximumZoomDistance = 4e7
 
-  viewer.camera.setView({ destination: at(77, 18, 1.2e7) })
+  viewer.camera.setView({ destination: at(77, 18, ORBIT_HEIGHT) })
+
+  let spinRaf = 0
+  let lastSpinTime = 0
 
   const state = {
     container,
@@ -70,7 +123,74 @@ function getSharedGlobe() {
     locations: [],
     onSelect: null,
     onLayerState: null,
+    spinning: false,
+    startSpin: null,
+    stopSpin: null,
   }
+
+  const spinStep = (now) => {
+    if (!state.spinning || viewer.isDestroyed()) {
+      spinRaf = 0
+      return
+    }
+    const dt = lastSpinTime ? Math.min(0.1, (now - lastSpinTime) / 1000) : 0
+    lastSpinTime = now
+    if (dt > 0 && !document.hidden && container.isConnected && scene.mode === Cesium.SceneMode.SCENE3D) {
+      viewer.camera.rotate(Cesium.Cartesian3.UNIT_Z, -0.11 * dt)
+      scene.requestRender()
+    }
+    spinRaf = requestAnimationFrame(spinStep)
+  }
+
+  state.startSpin = () => {
+    if (state.spinning && spinRaf) return
+    state.spinning = true
+    lastSpinTime = 0
+    spinRaf = requestAnimationFrame(spinStep)
+  }
+
+  state.stopSpin = () => {
+    state.spinning = false
+    if (spinRaf) {
+      cancelAnimationFrame(spinRaf)
+      spinRaf = 0
+    }
+  }
+
+  const isClientPosOnGlobe = (clientX, clientY) => {
+    if (viewer.isDestroyed() || scene.mode !== Cesium.SceneMode.SCENE3D) return true
+    const rect = scene.canvas.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return false
+    const pos = new Cesium.Cartesian2(clientX - rect.left, clientY - rect.top)
+    return Boolean(viewer.camera.pickEllipsoid(pos, MARS))
+  }
+
+  container.addEventListener(
+    'pointerdown',
+    (e) => {
+      if (isClientPosOnGlobe(e.clientX, e.clientY)) state.stopSpin()
+    },
+    { passive: true }
+  )
+  container.addEventListener(
+    'wheel',
+    (e) => {
+      if (isClientPosOnGlobe(e.clientX, e.clientY)) state.stopSpin()
+    },
+    { passive: true }
+  )
+  container.addEventListener(
+    'touchstart',
+    (e) => {
+      const t = e.touches && e.touches[0]
+      if ((e.touches && e.touches.length > 1) || (t && isClientPosOnGlobe(t.clientX, t.clientY))) {
+        state.stopSpin()
+      }
+    },
+    { passive: true }
+  )
+
+  state.startSpin()
 
   const handler = new Cesium.ScreenSpaceEventHandler(scene.canvas)
   handler.setInputAction((e) => {
@@ -78,7 +198,10 @@ function getSharedGlobe() {
     const id = picked && picked.id && picked.id.id
     if (typeof id === 'string' && id.startsWith('loc-')) {
       const loc = state.locations.find((l) => 'loc-' + l.id === id)
-      if (loc) state.onSelect?.(loc)
+      if (loc) {
+        state.stopSpin()
+        state.onSelect?.(loc)
+      }
     }
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
 
@@ -93,7 +216,6 @@ export default function MarsGlobe({
   layer,
   mode = '3D',
   onCenter,
-  onReset,
   controlsClassName,
   legendClassName,
 }) {
@@ -101,6 +223,7 @@ export default function MarsGlobe({
   const viewerRef = useRef(null)
   const onSelectRef = useRef(onSelect)
   const locRef = useRef(locations)
+  const prevFocusRef = useRef(focus)
 
   const showCard = layer !== undefined
   const key = layer || 'terrain'
@@ -169,30 +292,49 @@ export default function MarsGlobe({
     }
   }, [])
 
-  // Switch between 3D Globe and 2D Map View
+  // Switch between 3D Globe and 2D Map View cleanly without intermediate morph crash
   useEffect(() => {
-    const viewer = viewerRef.current || sharedGlobe?.viewer
+    const shared = getSharedGlobe()
+    const viewer = shared.viewer
     if (!viewer || viewer.isDestroyed()) return
     const scene = viewer.scene
+    const ctrl = scene.screenSpaceCameraController
     const want = mode === '2D' ? Cesium.SceneMode.SCENE2D : Cesium.SceneMode.SCENE3D
     if (scene.mode === want) return
-    const onMorphComplete = () => {
-      scene.morphComplete.removeEventListener(onMorphComplete)
-      if (focus) {
-        viewer.camera.flyTo({
-          destination: at(focus.lon, focus.lat, mode === '2D' ? 6e6 : 150000),
-          duration: 1.0,
-        })
-      }
-      scene.requestRender()
+
+    shared.stopSpin()
+    viewer.camera.cancelFlight()
+
+    if (mode === '2D') {
+      scene.backgroundColor = Cesium.Color.fromCssColorString('#2a1208')
+      scene.morphTo2D(1.0)
+      scene.completeMorph()
+      ctrl.maximumZoomDistance = 1.6e7
+      const targetRect = get2DFillRect(viewer, focus?.lon ?? 77)
+      viewer.camera.setView({
+        destination: Cesium.Rectangle.fromDegrees(-180, -82, 180, 82),
+      })
+      viewer.camera.flyTo({
+        destination: targetRect,
+        duration: 0.65,
+      })
+    } else {
+      scene.backgroundColor = Cesium.Color.TRANSPARENT
+      scene.morphTo3D(1.0)
+      scene.completeMorph()
+      ctrl.maximumZoomDistance = 4e7
+      const lon = focus?.lon ?? 77
+      const lat = focus?.lat ?? 18
+      viewer.camera.setView({
+        destination: at(lon, lat, ORBIT_HEIGHT * 1.25),
+      })
+      viewer.camera.flyTo({
+        destination: at(lon, lat, ORBIT_HEIGHT),
+        duration: 0.65,
+        complete: () => sharedGlobe?.startSpin(),
+      })
     }
-    scene.morphComplete.addEventListener(onMorphComplete)
-    if (mode === '2D') scene.morphTo2D(1.0)
-    else scene.morphTo3D(1.0)
     scene.requestRender()
-    return () => {
-      if (!viewer.isDestroyed()) scene.morphComplete.removeEventListener(onMorphComplete)
-    }
   }, [mode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load NASA Trek layer with local texture fallback (reuses existing imagery if layer key is unchanged)
@@ -266,15 +408,24 @@ export default function MarsGlobe({
     }
   }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Location + rover markers
+  // Location + rover markers with 3-tier zoom-dependent labels (Full Name -> Abbreviation -> Hidden)
   useEffect(() => {
     const viewer = viewerRef.current || sharedGlobe?.viewer
     if (!viewer || viewer.isDestroyed()) return
     viewer.entities.removeAll()
     const tracked = []
 
+    const initialHeight = getCameraZoomHeight(viewer)
+    const initialTier =
+      initialHeight <= FULL_NAME_MAX_HEIGHT
+        ? 'full'
+        : initialHeight <= ABBREV_MAX_HEIGHT
+        ? 'abbrev'
+        : 'hidden'
+
     const add = (id, name, lon, lat, color, dy = 0) => {
       const position = at(lon, lat)
+      const abbrev = getAbbrev(name)
       const ent = viewer.entities.add({
         id,
         position,
@@ -286,24 +437,22 @@ export default function MarsGlobe({
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
         label: {
-          text: name,
+          text: initialTier === 'full' ? name : abbrev,
+          show: initialTier !== 'hidden',
           font: '600 14px Inter, sans-serif',
           fillColor: Cesium.Color.WHITE,
           outlineColor: Cesium.Color.BLACK,
           outlineWidth: 3,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
           showBackground: true,
-          backgroundColor: Cesium.Color.fromCssColorString('#0b0f17').withAlpha(0.7),
+          backgroundColor: Cesium.Color.fromCssColorString('#0b0f17').withAlpha(0.75),
           backgroundPadding: new Cesium.Cartesian2(6, 4),
           horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
           pixelOffset: new Cesium.Cartesian2(14, dy),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
-          // Dure gele label chhoto + halka hoye jabe, bhir kombe
-          scaleByDistance: new Cesium.NearFarScalar(1e5, 1.0, 1.5e7, 0.6),
-          translucencyByDistance: new Cesium.NearFarScalar(2e6, 1.0, 2e7, 0.0),
         },
       })
-      tracked.push({ ent, position })
+      tracked.push({ ent, position, fullName: name, abbrev })
     }
 
     locations.forEach((l) => add('loc-' + l.id, l.name, l.lon, l.lat, l.color))
@@ -311,15 +460,40 @@ export default function MarsGlobe({
       ROVERS.forEach((r) => add('rover-' + r.id, r.name, r.lon, r.lat, '#38bdf8', 16))
     }
 
-    // Hide far-side markers in 3D, show all in 2D
+    let lastTier = initialTier
     const occluder = new Cesium.EllipsoidalOccluder(MARS, viewer.camera.positionWC)
     const onPreRender = () => {
-      const is3D = viewer.scene.mode === Cesium.SceneMode.SCENE3D
+      if (viewer.isDestroyed()) return
+      const sceneMode = viewer.scene.mode
+      if (sceneMode === Cesium.SceneMode.MORPHING) return
+
+      const is3D = sceneMode === Cesium.SceneMode.SCENE3D
+      const camHeight = getCameraZoomHeight(viewer)
+      const tier =
+        camHeight <= FULL_NAME_MAX_HEIGHT
+          ? 'full'
+          : camHeight <= ABBREV_MAX_HEIGHT
+          ? 'abbrev'
+          : 'hidden'
+
+      const tierChanged = tier !== lastTier
+      if (tierChanged) lastTier = tier
+
       occluder.cameraPosition = viewer.camera.positionWC
-      tracked.forEach(({ ent, position }) => {
+      for (let i = 0; i < tracked.length; i++) {
+        const { ent, position, fullName, abbrev } = tracked[i]
         const visible = !is3D || occluder.isPointVisible(position)
         if (ent.show !== visible) ent.show = visible
-      })
+
+        if (tierChanged && ent.label) {
+          if (tier === 'hidden') {
+            ent.label.show = false
+          } else {
+            ent.label.show = true
+            ent.label.text = tier === 'full' ? fullName : abbrev
+          }
+        }
+      }
     }
     viewer.scene.preRender.addEventListener(onPreRender)
     viewer.scene.requestRender()
@@ -329,24 +503,32 @@ export default function MarsGlobe({
     }
   }, [locations, key])
 
-  // Fly to focused location
+  // Fly to focused location only when the user explicitly selects/changes a location after mount
   useEffect(() => {
+    if (prevFocusRef.current === focus) return
+    prevFocusRef.current = focus
     const viewer = viewerRef.current || sharedGlobe?.viewer
     if (!viewer || viewer.isDestroyed() || !focus) return
+    sharedGlobe?.stopSpin()
     viewer.camera.flyTo({ destination: at(focus.lon, focus.lat, 150000), duration: 1.6 })
     viewer.scene.requestRender()
   }, [focus])
 
   const zoom = (dir) => {
+    sharedGlobe?.stopSpin()
     const viewer = viewerRef.current || sharedGlobe?.viewer
     const cam = viewer?.camera
     if (!cam) return
-    const h = cam.positionCartographic.height
-    dir > 0 ? cam.zoomIn(h * 0.5) : cam.zoomOut(h * 0.7)
+    const h = getCameraZoomHeight(viewer)
+    if (viewer.scene.mode === Cesium.SceneMode.SCENE2D && dir < 0 && h >= 1.1e7) {
+      return
+    }
+    dir > 0 ? cam.zoomIn(h * 0.45) : cam.zoomOut(h * 0.6)
     viewer.scene.requestRender()
   }
 
   const handleCenter = () => {
+    sharedGlobe?.stopSpin()
     if (onCenter) {
       onCenter()
     } else if (focus) {
@@ -357,18 +539,22 @@ export default function MarsGlobe({
   }
 
   const handleReset = () => {
-    if (onReset) {
-      onReset()
+    const viewer = viewerRef.current || sharedGlobe?.viewer
+    if (!viewer) return
+    sharedGlobe?.stopSpin()
+    if (viewer.scene.mode === Cesium.SceneMode.SCENE2D) {
+      viewer.camera.flyTo({
+        destination: get2DFillRect(viewer, focus?.lon ?? 77),
+        duration: 1.2,
+      })
     } else {
-      const viewer = viewerRef.current || sharedGlobe?.viewer
-      if (!viewer) return
-      if (viewer.scene.mode === Cesium.SceneMode.SCENE2D) {
-        viewer.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(-180, -85, 180, 85), duration: 1.6 })
-      } else {
-        viewer.camera.flyTo({ destination: at(77, 18, 1.2e7), duration: 1.6 })
-      }
-      viewer.scene.requestRender()
+      viewer.camera.flyTo({
+        destination: at(77, 18, ORBIT_HEIGHT),
+        duration: 1.6,
+        complete: () => sharedGlobe?.startSpin(),
+      })
     }
+    viewer.scene.requestRender()
   }
 
   const msg = {
@@ -381,7 +567,13 @@ export default function MarsGlobe({
     'flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-black/60 backdrop-blur-md hover:bg-white/10'
 
   return (
-    <div className="relative isolate h-full w-full">
+    <div
+      className="relative isolate h-full w-full bg-cover bg-center bg-no-repeat"
+      style={{
+        backgroundColor: '#1a0d07',
+        backgroundImage: mode === '2D' ? 'none' : "url('/assets/deep_space.png')",
+      }}
+    >
       <div ref={elRef} className="h-full w-full" />
 
       {/* Zoom in, Zoom out, Center on location, Reset buttons on the right top side */}

@@ -3,5 +3,5 @@ import locations from '../data/locations.json'
 
 export const useMapStore = create((set) => ({
   selected: locations[0],
-  setSelected: (selected) => set({ selected }),
+  setSelected: (selected) => set({ selected: selected ? { ...selected } : selected }),
 }))
