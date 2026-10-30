@@ -202,7 +202,7 @@ export function applyLayer(viewer, cfg, key, cb) {
   ;(async () => {
     let mainReady = false
     if (viewer.imageryLayers.length === 0) {
-      Cesium.SingleTileImageryProvider.fromUrl('/textures/mars.jpg', {
+      Cesium.SingleTileImageryProvider.fromUrl('/assets/mars_texture.jpg', {
         rectangle: Cesium.Rectangle.MAX_VALUE,
         ellipsoid: MARS,
       })
@@ -227,20 +227,15 @@ export function applyLayer(viewer, cfg, key, cb) {
     if (!chosen) {
       console.warn('[RedMap] No working tile source for layer:', key, '– using local texture fallback')
       try {
-        const fallback = await Cesium.SingleTileImageryProvider.fromUrl('/textures/8k_mars.jpg', {
+        const fallback = await Cesium.SingleTileImageryProvider.fromUrl('/assets/mars_texture.jpg', {
           rectangle: Cesium.Rectangle.MAX_VALUE,
           ellipsoid: MARS,
-        }).catch(() =>
-          Cesium.SingleTileImageryProvider.fromUrl('/textures/mars.jpg', {
-            rectangle: Cesium.Rectangle.MAX_VALUE,
-            ellipsoid: MARS,
-          })
-        )
+        })
         if (!isCancelled() && fallback) {
           viewer.imageryLayers.removeAll()
           viewer.imageryLayers.addImageryProvider(fallback)
           viewer.scene.requestRender()
-          cb.onSource('Local 8K Mars Texture')
+          cb.onSource('Local Mars Texture')
           cb.onStatus('ok')
           return
         }
