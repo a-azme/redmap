@@ -32,7 +32,7 @@ export default function ExplorePage() {
   }
 
   const choose = (loc) => {
-    setSelected(loc)
+    setSelected({ ...loc })
     rootRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
   }
 

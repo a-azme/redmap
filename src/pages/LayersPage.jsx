@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import {
   Mountain, Layers, Gem, Hexagon, Thermometer, Wind,
   ExternalLink, TrendingUp, MapPin,
@@ -87,8 +87,11 @@ export default function LayersPage() {
   const setStoreSelected = useMapStore((s) => s.setSelected)
   const [active, setActive] = useState('terrain')
 
-  const selected = LOCATIONS.find((l) => l.id === storeSelected.id) || LOCATIONS[0]
-  const pick = useCallback((loc) => setStoreSelected(loc), [setStoreSelected])
+  const selected = useMemo(
+    () => ({ ...(LOCATIONS.find((l) => l.id === storeSelected.id) || LOCATIONS[0]) }),
+    [storeSelected]
+  )
+  const pick = useCallback((loc) => setStoreSelected({ ...loc }), [setStoreSelected])
   const toggleLayer = (id) => setActive((cur) => (cur === id ? 'terrain' : id))
 
   return (
@@ -97,7 +100,7 @@ export default function LayersPage() {
       <div className="relative h-[75vh] min-h-[460px] xl:absolute xl:inset-0 xl:h-auto xl:min-h-0">
         <MarsGlobe
           locations={LOCATIONS}
-          focus={storeSelected}
+          focus={selected}
           onSelect={pick}
           layer={active}
           onCenter={() => pick({ ...selected })}
