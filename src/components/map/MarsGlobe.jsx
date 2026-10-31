@@ -594,28 +594,28 @@ export default function MarsGlobe({
 
       {showCard && cardVisible && (
         <div
-          className={`absolute z-20 rounded-2xl border border-white/10 bg-black/80 p-3 backdrop-blur-md shadow-xl transition-all duration-300 w-[260px] sm:w-[280px] ${
-            legendClassName || 'bottom-28 left-1/2 -translate-x-1/2'
+          className={`absolute z-20 w-[240px] rounded-xl border border-white/10 bg-black/80 px-2.5 py-2 shadow-xl backdrop-blur-md transition-all duration-300 sm:w-[260px] ${
+            legendClassName || 'bottom-32 left-1/2 -translate-x-1/2 xl:bottom-36'
           }`}
         >
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-semibold text-white">{cfg.title}</span>
+            <span className="text-[11px] font-semibold leading-tight text-white">{cfg.title}</span>
             <button
               onClick={() => setCardVisible(false)}
               className="rounded p-0.5 text-gray-400 hover:bg-white/10 hover:text-white"
               title="Close description"
               aria-label="Close"
             >
-              <X size={13} />
+              <X size={12} />
             </button>
           </div>
-          <div className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-gray-300">
+          <div className="mt-0.5 line-clamp-2 text-[10.5px] leading-snug text-gray-300">
             {cfg.note}
           </div>
           {cfg.legend && (
-            <div className="mt-2">
-              <div className="h-2 rounded-full" style={{ background: cfg.legend.bar }} />
-              <div className="mt-1 flex justify-between text-[10px] text-gray-400">
+            <div className="mt-1.5">
+              <div className="h-1.5 rounded-full" style={{ background: cfg.legend.bar }} />
+              <div className="mt-0.5 flex justify-between text-[9.5px] text-gray-400">
                 {cfg.legend.labels.map((l) => (
                   <span key={l}>{l}</span>
                 ))}
@@ -623,12 +623,12 @@ export default function MarsGlobe({
             </div>
           )}
           {used && (
-            <div className="mt-1.5 truncate text-[10px] text-gray-400">
+            <div className="mt-1 truncate text-[9.5px] text-gray-400">
               Source: {used}
             </div>
           )}
           {status === 'error' && (
-            <div className="mt-1 border-t border-white/10 pt-1 text-[10px] text-red-400">
+            <div className="mt-1 border-t border-white/10 pt-1 text-[9.5px] text-red-400">
               {msg}
             </div>
           )}

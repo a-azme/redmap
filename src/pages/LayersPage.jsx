@@ -106,7 +106,7 @@ export default function LayersPage() {
           onCenter={() => pick({ ...selected })}
           onReset={() => pick(LOCATIONS[0])}
           controlsClassName="right-3 top-3 xl:right-[306px] xl:top-4"
-          legendClassName="bottom-24 left-1/2 -translate-x-1/2 xl:bottom-28"
+          legendClassName="bottom-[132px] left-1/2 -translate-x-1/2 xl:bottom-[142px]"
         />
 
         {/* Left: Map Layers (desktop only, concise) */}
@@ -186,7 +186,7 @@ export default function LayersPage() {
       </div>
 
       {/* Right: details (below the globe on mobile, concise on desktop above bottom bar) */}
-      <aside className={`relative z-[1100] m-2 p-4 xl:absolute xl:bottom-[120px] xl:right-4 xl:top-4 xl:m-0 xl:w-[280px] xl:overflow-y-auto xl:p-3.5 ${panel}`}>
+      <aside className={`relative z-[1100] m-2 p-4 xl:absolute xl:right-4 xl:top-4 xl:m-0 xl:max-h-[calc(100%-148px)] xl:w-[280px] xl:overflow-y-auto xl:p-3.5 ${panel}`}>
         <div className="flex gap-3">
           <div
             className="h-16 w-16 shrink-0 rounded-xl"
