@@ -12,6 +12,7 @@
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="preload" as="image" href="/assets/splash.jpg" media="(min-width: 701px)" />
+    <link rel="preload" as="image" href="/assets/mars_texture.jpg" fetchpriority="high" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Poppins:wght@800&display=swap" />
@@ -139,7 +140,7 @@
 
         var start = Date.now();
         var MIN_MS = 1200;
-        var MAX_MS = 3000;
+        var MAX_MS = 3500;
         var bg = document.getElementById('rm-splash-bg');
         if (bg) {
           var show = function () { bg.classList.add('ready'); };
