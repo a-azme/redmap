@@ -4,6 +4,7 @@ import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { Plus, Minus, Crosshair, RotateCcw, X } from 'lucide-react'
 import { TILE_LAYERS, ROVERS } from '../../services/layerService'
 import { MARS, at, applyLayer, guardCesiumViewer } from '../../services/tiles'
+import { MARS_LOCATIONS, getIdealFlyHeightMeters } from '../../services/marsLocations'
 
 window.CESIUM_BASE_URL = '/cesium/'
 
@@ -13,10 +14,12 @@ const ABBREV_MAX_HEIGHT = 1.1e7
 
 function getAbbrev(name) {
   if (!name) return ''
-  const words = name
+  const cleaned = name
+    .replace(/\([^)]*\)/g, '')
     .replace(/\b[A-Z]\.\s*/g, '')
-    .split(/[\s-]+/)
-    .filter(Boolean)
+    .trim()
+  const words = cleaned.split(/[\s-]+/).filter(Boolean)
+  if (words.length === 0) return name.slice(0, 3).toUpperCase()
   if (words.length === 1) return words[0].slice(0, 3).toUpperCase()
   return words.map((w) => w[0]?.toUpperCase() || '').join('')
 }
@@ -41,7 +44,7 @@ function get2DFillRect(viewer, centerLon = 77) {
   const aspect = Math.max(0.4, Math.min(2.4, cw / ch))
   const latHalf = 68
   const lonHalf = Math.min(95, latHalf * aspect * 0.92)
-  const normLon = ((centerLon + 180) % 360 + 360) % 360 - 180
+  const normLon = (((centerLon + 180) % 360) + 360) % 360 - 180
   const clampedCenter = Math.max(-180 + lonHalf, Math.min(180 - lonHalf, normLon))
   return Cesium.Rectangle.fromDegrees(
     clampedCenter - lonHalf,
@@ -210,20 +213,23 @@ function getSharedGlobe() {
 }
 
 export default function MarsGlobe({
-  locations,
+  locations = MARS_LOCATIONS,
   focus,
   onSelect,
   layer,
   mode = '3D',
   onCenter,
+  onCameraChange,
   controlsClassName,
   legendClassName,
 }) {
   const elRef = useRef(null)
   const viewerRef = useRef(null)
   const onSelectRef = useRef(onSelect)
+  const onCameraChangeRef = useRef(onCameraChange)
   const locRef = useRef(locations)
   const prevFocusRef = useRef(focus)
+  const focusIdRef = useRef(focus?.id)
 
   const showCard = layer !== undefined
   const key = layer || 'terrain'
@@ -236,6 +242,14 @@ export default function MarsGlobe({
     sharedGlobe && sharedGlobe.appliedKey === key ? sharedGlobe.used : ''
   )
   const [cardVisible, setCardVisible] = useState(true)
+
+  useEffect(() => {
+    focusIdRef.current = focus?.id
+  }, [focus?.id])
+
+  useEffect(() => {
+    onCameraChangeRef.current = onCameraChange
+  }, [onCameraChange])
 
   // Keep singleton click handler synced with the currently mounted page
   useEffect(() => {
@@ -408,59 +422,109 @@ export default function MarsGlobe({
     }
   }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Location + rover markers with 3-tier zoom-dependent labels (Full Name -> Abbreviation -> Hidden)
+  // Location, region, and rover markers with per-item [min_alt_km, max_alt_km] zoom visibility
   useEffect(() => {
     const viewer = viewerRef.current || sharedGlobe?.viewer
     if (!viewer || viewer.isDestroyed()) return
     viewer.entities.removeAll()
     const tracked = []
 
-    const initialHeight = getCameraZoomHeight(viewer)
-    const initialTier =
-      initialHeight <= FULL_NAME_MAX_HEIGHT
-        ? 'full'
-        : initialHeight <= ABBREV_MAX_HEIGHT
-        ? 'abbrev'
-        : 'hidden'
-
-    const add = (id, name, lon, lat, color, dy = 0) => {
+    const add = (item, dy = 0) => {
+      const id = item.entityId || 'loc-' + item.id
+      const name = item.name
+      const lon = item.lon
+      const lat = item.lat
+      const color = item.color || '#ef4444'
       const position = at(lon, lat)
       const abbrev = getAbbrev(name)
+      const hasAltBounds =
+        typeof item.min_alt_km === 'number' && typeof item.max_alt_km === 'number'
+      const minAltKm = hasAltBounds ? item.min_alt_km : 0
+      // Add +50 km buffer at 8000 km so initial ORBIT_HEIGHT (8000 km) never flickers from float drift
+      const maxAltKm = hasAltBounds
+        ? item.max_alt_km >= 8000
+          ? 8050
+          : item.max_alt_km
+        : 8050
+      const abbrevThresholdKm = hasAltBounds
+        ? minAltKm + (maxAltKm - minAltKm) * 0.78
+        : FULL_NAME_MAX_HEIGHT / 1000
+
+      const isRegion = Boolean(item.isRegion || (item.category && item.category.startsWith('REGION_')))
+      const isMissionHub = item.category === 'NASA_MISSION_HUB'
+      const isNasa = Boolean(item.is_nasa)
+
+      const pixelSize = isMissionHub ? 11 : isRegion ? 8 : isNasa ? 9.5 : 7
+      const baseColor = Cesium.Color.fromCssColorString(color)
+
       const ent = viewer.entities.add({
         id,
         position,
+        show: false,
         point: {
-          pixelSize: 11,
-          color: Cesium.Color.fromCssColorString(color),
-          outlineColor: Cesium.Color.WHITE,
-          outlineWidth: 2,
+          pixelSize,
+          color: isRegion ? baseColor.withAlpha(0.45) : baseColor,
+          outlineColor: isRegion ? baseColor : Cesium.Color.WHITE,
+          outlineWidth: isMissionHub ? 2.5 : isRegion ? 2 : isNasa ? 2 : 1.5,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
         label: {
-          text: initialTier === 'full' ? name : abbrev,
-          show: initialTier !== 'hidden',
-          font: '600 14px Inter, sans-serif',
-          fillColor: Cesium.Color.WHITE,
+          text: isRegion ? name.toUpperCase() : name,
+          show: true,
+          font: isRegion
+            ? '700 12px Inter, sans-serif'
+            : isNasa || isMissionHub
+            ? '600 13px Inter, sans-serif'
+            : '500 12px Inter, sans-serif',
+          fillColor: isRegion ? Cesium.Color.fromCssColorString('#fde68a') : Cesium.Color.WHITE,
           outlineColor: Cesium.Color.BLACK,
           outlineWidth: 3,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
           showBackground: true,
-          backgroundColor: Cesium.Color.fromCssColorString('#0b0f17').withAlpha(0.75),
+          backgroundColor: Cesium.Color.fromCssColorString('#0b0f17').withAlpha(isRegion ? 0.65 : 0.75),
           backgroundPadding: new Cesium.Cartesian2(6, 4),
           horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
-          pixelOffset: new Cesium.Cartesian2(14, dy),
+          pixelOffset: new Cesium.Cartesian2(12, dy),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
       })
-      tracked.push({ ent, position, fullName: name, abbrev })
+
+      tracked.push({
+        ent,
+        rawId: item.id,
+        position,
+        fullName: isRegion ? name.toUpperCase() : name,
+        abbrev,
+        hasAltBounds,
+        minAltKm,
+        maxAltKm,
+        abbrevThresholdKm,
+        level: item.level || 1,
+        isRegion,
+        lastText: isRegion ? name.toUpperCase() : name,
+        lastLabelShow: true,
+      })
     }
 
-    locations.forEach((l) => add('loc-' + l.id, l.name, l.lon, l.lat, l.color))
+    locations.forEach((l) => add(l))
     if (key === 'missions') {
-      ROVERS.forEach((r) => add('rover-' + r.id, r.name, r.lon, r.lat, '#38bdf8', 16))
+      ROVERS.forEach((r) =>
+        add(
+          {
+            ...r,
+            entityId: 'rover-' + r.id,
+            color: '#38bdf8',
+            category: 'NASA_MISSION_HUB',
+            is_nasa: true,
+            min_alt_km: 50,
+            max_alt_km: 8000,
+          },
+          16
+        )
+      )
     }
 
-    let lastTier = initialTier
+    let lastReportedAlt = -1
     const occluder = new Cesium.EllipsoidalOccluder(MARS, viewer.camera.positionWC)
     const onPreRender = () => {
       if (viewer.isDestroyed()) return
@@ -469,28 +533,81 @@ export default function MarsGlobe({
 
       const is3D = sceneMode === Cesium.SceneMode.SCENE3D
       const camHeight = getCameraZoomHeight(viewer)
-      const tier =
-        camHeight <= FULL_NAME_MAX_HEIGHT
-          ? 'full'
-          : camHeight <= ABBREV_MAX_HEIGHT
-          ? 'abbrev'
-          : 'hidden'
+      const altKm = camHeight / 1000
 
-      const tierChanged = tier !== lastTier
-      if (tierChanged) lastTier = tier
+      if (onCameraChangeRef.current && Math.abs(altKm - lastReportedAlt) >= 15) {
+        lastReportedAlt = altKm
+        const activeLevel = altKm > 3200 ? 1 : altKm > 1100 ? 2 : 3
+        onCameraChangeRef.current(Math.round(altKm), activeLevel)
+      }
 
       occluder.cameraPosition = viewer.camera.positionWC
-      for (let i = 0; i < tracked.length; i++) {
-        const { ent, position, fullName, abbrev } = tracked[i]
-        const visible = !is3D || occluder.isPointVisible(position)
-        if (ent.show !== visible) ent.show = visible
+      const focusedId = focusIdRef.current
 
-        if (tierChanged && ent.label) {
-          if (tier === 'hidden') {
-            ent.label.show = false
+      for (let i = 0; i < tracked.length; i++) {
+        const item = tracked[i]
+        const { ent, position } = item
+        const isFocused = focusedId && item.rawId === focusedId
+
+        // 1. Check altitude visibility window [min_alt_km, max_alt_km]
+        let inAltRange = false
+        let showLabel = true
+        let useAbbrev = false
+
+        if (item.hasAltBounds) {
+          if (isFocused) {
+            inAltRange = true
+            showLabel = true
+            useAbbrev = false
+          } else if (altKm >= item.minAltKm && altKm <= item.maxAltKm) {
+            inAltRange = true
+            showLabel = true
+            useAbbrev = altKm > item.abbrevThresholdKm
+          } else if (item.level === 1 && altKm > item.maxAltKm) {
+            // Keep Level 1 major region pointers visible when zoomed far out (> 8000 km), with abbreviations up to 11,000 km
+            inAltRange = true
+            if (altKm <= ABBREV_MAX_HEIGHT / 1000) {
+              showLabel = true
+              useAbbrev = true
+            } else {
+              showLabel = false
+            }
+          }
+        } else {
+          inAltRange = true
+          if (camHeight <= FULL_NAME_MAX_HEIGHT) {
+            showLabel = true
+            useAbbrev = false
+          } else if (camHeight <= ABBREV_MAX_HEIGHT) {
+            showLabel = true
+            useAbbrev = true
           } else {
-            ent.label.show = true
-            ent.label.text = tier === 'full' ? fullName : abbrev
+            showLabel = false
+          }
+        }
+
+        if (!inAltRange) {
+          if (ent.show) ent.show = false
+          continue
+        }
+
+        // 2. Check front-hemisphere horizon occlusion in 3D
+        const onFrontHemisphere = !is3D || occluder.isPointVisible(position)
+        if (!onFrontHemisphere) {
+          if (ent.show) ent.show = false
+          continue
+        }
+
+        if (!ent.show) ent.show = true
+        if (item.lastLabelShow !== showLabel) {
+          ent.label.show = showLabel
+          item.lastLabelShow = showLabel
+        }
+        if (showLabel) {
+          const nextText = useAbbrev ? item.abbrev : item.fullName
+          if (item.lastText !== nextText) {
+            ent.label.text = nextText
+            item.lastText = nextText
           }
         }
       }
@@ -510,7 +627,8 @@ export default function MarsGlobe({
     const viewer = viewerRef.current || sharedGlobe?.viewer
     if (!viewer || viewer.isDestroyed() || !focus) return
     sharedGlobe?.stopSpin()
-    viewer.camera.flyTo({ destination: at(focus.lon, focus.lat, 150000), duration: 1.6 })
+    const targetHeight = getIdealFlyHeightMeters(focus)
+    viewer.camera.flyTo({ destination: at(focus.lon, focus.lat, targetHeight), duration: 1.6 })
     viewer.scene.requestRender()
   }, [focus])
 
@@ -533,7 +651,8 @@ export default function MarsGlobe({
       onCenter()
     } else if (focus) {
       const viewer = viewerRef.current || sharedGlobe?.viewer
-      viewer?.camera.flyTo({ destination: at(focus.lon, focus.lat, 150000), duration: 1.6 })
+      const targetHeight = getIdealFlyHeightMeters(focus)
+      viewer?.camera.flyTo({ destination: at(focus.lon, focus.lat, targetHeight), duration: 1.6 })
       viewer?.scene.requestRender()
     }
   }
