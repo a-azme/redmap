@@ -10,7 +10,7 @@ export default function SearchBar() {
   const boxRef = useRef(null)
   const navigate = useNavigate()
   const locations = useMarsLocations()
-  const setSelected = useMapStore((s) => s.setSelected)
+  const selectWithDetails = useMapStore((s) => s.selectWithDetails)
 
   const q = query.trim().toLowerCase()
   const results = useMemo(() => {
@@ -36,7 +36,7 @@ export default function SearchBar() {
     setQuery('')
     setOpen(false)
     navigate('/')
-    setTimeout(() => setSelected(loc), 0)
+    setTimeout(() => selectWithDetails(loc), 0)
   }
 
   return (
