@@ -49,7 +49,9 @@ function Switch({ on, onClick }) {
 export default function LayersPage() {
   const locations = useMarsLocations()
   const storeSelected = useMapStore((s) => s.selected)
+  const storeFocus = useMapStore((s) => s.focusTarget)
   const setStoreSelected = useMapStore((s) => s.setSelected)
+  const clearFocus = useMapStore((s) => s.clearFocus)
   const [active, setActive] = useState('terrain')
 
   const selected = useMemo(() => {
@@ -66,11 +68,11 @@ export default function LayersPage() {
       <div className="relative h-full w-full">
         <MarsGlobe
           locations={locations}
-          focus={selected}
+          focus={storeFocus}
           onSelect={pick}
           layer={active}
           onCenter={() => pick({ ...selected })}
-          onReset={() => pick(DEFAULT_LOCATION)}
+          onReset={() => clearFocus()}
           controlsClassName="right-3 top-3 sm:right-4 sm:top-4"
           legendClassName="bottom-[132px] left-1/2 -translate-x-1/2 xl:bottom-[142px]"
         />
@@ -124,7 +126,7 @@ export default function LayersPage() {
             {fmtLat(selected.lat)}, {fmtLon(selected.lon)}
           </div>
           <div className="text-[11px] text-gray-400">
-            {selected.diameter > 0 ? `Diameter: ${selected.diameter} km` : 'Landing Site'} · L{selected.level} ({selected.min_alt_km}–{selected.max_alt_km} km)
+            Elevation: {selected.elevation} km
           </div>
         </div>
 

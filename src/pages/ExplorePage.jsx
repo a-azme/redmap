@@ -11,7 +11,6 @@ import {
   Mountain,
   Thermometer,
   Truck,
-  Bookmark,
 } from 'lucide-react'
 import MarsGlobe from '../components/map/MarsGlobe'
 import LocationThumb from '../components/map/LocationThumb'
@@ -28,7 +27,6 @@ const menu = [
   { label: 'Map View', icon: Map },
   { label: 'Locations', icon: MapPin },
   { label: 'Rover Tracks', icon: Truck },
-  { label: 'Bookmarks', icon: Bookmark },
 ]
 
 const tabs = ['Popular Locations', 'Regions', 'Landforms', 'Features']
@@ -42,7 +40,7 @@ const SHEET_HEIGHTS = {
   full: 'h-[85%]',
 }
 
-const SCALE_STEPS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000]
+const SCALE_STEPS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000]
 
 function getMapScale(altKm) {
   const safeAlt = Math.max(0.5, Number(altKm) || 8000)
@@ -64,9 +62,11 @@ function getMapScale(altKm) {
 export default function ExplorePage() {
   const locations = useMarsLocations()
   const storeSelected = useMapStore((s) => s.selected)
+  const storeFocus = useMapStore((s) => s.focusTarget)
   const detailsOpen = useMapStore((s) => s.detailsOpen)
   const sheetSnap = useMapStore((s) => s.sheetSnap)
   const setSelected = useMapStore((s) => s.setSelected)
+  const clearFocus = useMapStore((s) => s.clearFocus)
   const setDetailsOpen = useMapStore((s) => s.setDetailsOpen)
   const setSheetSnap = useMapStore((s) => s.setSheetSnap)
   const selectWithDetails = useMapStore((s) => s.selectWithDetails)
@@ -170,7 +170,7 @@ export default function ExplorePage() {
       <div className="relative h-full w-full lg:absolute lg:inset-0 lg:right-[440px] lg:w-auto">
         <MarsGlobe
           locations={locations}
-          focus={selected}
+          focus={storeFocus}
           onSelect={handleSelectLocation}
           onHoverCoord={setHoverCoord}
           enableCrosshair
@@ -178,10 +178,7 @@ export default function ExplorePage() {
           layer={view === 'Rover Tracks' ? 'missions' : undefined}
           onCameraChange={(altKm, level) => setCamState({ altKm, level })}
           onCenter={() => setSelected({ ...selected })}
-          onReset={() => {
-            setSelected(DEFAULT_LOCATION)
-            setDetailsOpen(false)
-          }}
+          onReset={() => clearFocus()}
         />
 
         {/* Top-left mode switcher */}
@@ -206,9 +203,9 @@ export default function ExplorePage() {
           ))}
         </aside>
 
-        {/* Bottom-right live coordinates & distance scale HUD */}
+        {/* Bottom-left live axis / coordinates */}
         <div
-          className={`pointer-events-none absolute bottom-[74px] right-2.5 z-20 flex items-center gap-2.5 px-3 py-1.5 font-mono text-[11px] tabular-nums sm:gap-3.5 sm:px-3.5 sm:py-2 sm:text-xs lg:bottom-5 lg:right-4 ${panel}`}
+          className={`pointer-events-none absolute bottom-[74px] left-2.5 z-20 flex items-center gap-2 px-3 py-1.5 font-mono text-[11px] tabular-nums sm:px-3.5 sm:py-2 sm:text-xs lg:bottom-5 lg:left-4 ${panel}`}
         >
           <span
             className={`flex items-center font-sans text-xs font-bold leading-none ${
@@ -220,15 +217,15 @@ export default function ExplorePage() {
           <span>
             {fmtLat(activeLat)}, {fmtLon(activeLon)}
           </span>
-          <span className="text-white/20">·</span>
-          {/* Distance Metric Scale Bar */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-gray-300 sm:text-[11px]">{scale.label}</span>
-            <div
-              className="h-1.5 border-b border-x border-white/80 transition-[width] duration-150"
-              style={{ width: `${scale.widthPx}px` }}
-            />
-          </div>
+        </div>
+
+        {/* Bottom-right distance metric scale (no border or card) */}
+        <div className="pointer-events-none absolute bottom-[74px] right-3 z-20 flex items-center gap-2 font-mono text-[11px] tabular-nums drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] sm:text-xs lg:bottom-5 lg:right-4">
+          <span className="text-[11px] font-medium text-white/90 sm:text-xs">{scale.label}</span>
+          <div
+            className="h-1.5 border-b border-x border-white/90 transition-[width] duration-150"
+            style={{ width: `${scale.widthPx}px` }}
+          />
         </div>
       </div>
 

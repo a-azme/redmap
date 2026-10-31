@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import rawLocations from '../data/mars_globe_locations.json'
 
 export const CATEGORY_META = {
@@ -199,6 +198,45 @@ const CURATED_DETAILS = {
   },
 }
 
+const CATEGORY_SECOND_WORD = {
+  CRATER: 'Crater',
+  REGION_TERRA: 'Terra',
+  REGION_PLANITIA: 'Planitia',
+  REGION_PLANUM: 'Planum',
+  REGION_VASTITAS: 'Vastitas',
+  VOLCANO_MONS: 'Mons',
+  VOLCANO_DOME: 'Dome',
+  CANYON_VALLEY: 'Valley',
+  CLIFF_MESA_TRENCH: 'Mesa',
+  NOTABLE_TERRAIN: 'Terrain',
+  NASA_MISSION_HUB: 'Hub',
+}
+
+export function getCategorySecondWord(category) {
+  if (!category) return ''
+  if (CATEGORY_SECOND_WORD[category]) return CATEGORY_SECOND_WORD[category]
+  const raw = String(category).split('_').pop() || ''
+  return raw ? raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase() : ''
+}
+
+export function getLocationAbbrev(name, category) {
+  if (!name) return ''
+  const cleaned = String(name)
+    .replace(/\([^)]*\)/g, '')
+    .replace(/\b[A-Z]\.\s*/g, '')
+    .trim()
+  const words = cleaned.split(/[\s-]+/).filter(Boolean)
+  if (words.length === 0) return String(name).slice(0, 2).toUpperCase()
+  if (words.length === 1) {
+    const secondWord = getCategorySecondWord(category)
+    if (secondWord) {
+      return `${words[0][0] || ''}${secondWord[0] || ''}`.toUpperCase()
+    }
+    return words[0].slice(0, 2).toUpperCase()
+  }
+  return words.map((w) => w[0]?.toUpperCase() || '').join('')
+}
+
 function slugify(name, index) {
   if (CANONICAL_IDS[name]) return CANONICAL_IDS[name]
   const base = String(name || `loc-${index}`)
@@ -252,6 +290,14 @@ export function normalizeMarsLocations(list) {
     const max_alt_km = Number(raw.max_alt_km) || 8000
     const is_nasa = Boolean(raw.is_nasa)
 
+    const rawWords = String(raw.name || '').trim().split(/[\s-]+/).filter(Boolean)
+    const displayName =
+      rawWords.length === 1 && getCategorySecondWord(raw.category)
+        ? `${rawWords[0]} ${getCategorySecondWord(raw.category)}`
+        : raw.name
+
+    const abbrev = getLocationAbbrev(raw.name, raw.category)
+
     const estTemp = curated?.temp ?? Math.round(-55 - Math.abs(lat) * 0.45)
     const elevation = curated?.elevation ?? meta.defaultElev
     const slope = curated?.slope ?? meta.defaultSlope
@@ -265,7 +311,9 @@ export function normalizeMarsLocations(list) {
 
     return {
       id,
-      name: raw.name,
+      name: displayName,
+      rawName: raw.name,
+      abbrev,
       category: raw.category,
       type: meta.type,
       tag: is_nasa ? `NASA • ${meta.tag}` : meta.tag,
@@ -282,7 +330,9 @@ export function normalizeMarsLocations(list) {
       slope,
       temp: estTemp,
       terrain: curated?.terrain || meta.terrain,
-      desc: curated?.desc || buildDescription({ ...raw, lat, lon, diameter, level, min_alt_km, max_alt_km, is_nasa }, meta),
+      desc:
+        curated?.desc ||
+        buildDescription({ ...raw, name: displayName, lat, lon, diameter, level, min_alt_km, max_alt_km, is_nasa }, meta),
       mission: curated?.mission || {
         name: is_nasa ? 'NASA Mars Reconnaissance & Odyssey Orbiters' : 'MGS MOLA & MRO Global Survey',
         years: '1997 – Present',
@@ -328,45 +378,16 @@ export function getIdealFlyHeightMeters(loc) {
   const diamKm = Number(loc.diameter) || 0
 
   if (Number.isFinite(minKm) && Number.isFinite(maxKm) && maxKm > minKm) {
-    const lowBound = Math.max(minKm * 1.12, minKm + 25)
-    const highBound = Math.max(lowBound, maxKm * 0.72)
+    const lowBound = Math.max(50, minKm * 1.12, minKm + 25)
+    const highBound = Math.min(330000, Math.max(lowBound, maxKm * 0.72))
     const targetFromDiameter = diamKm > 0 ? Math.max(220, diamKm * 1.55) : 240
-    const clampedKm = Math.max(lowBound, Math.min(highBound, targetFromDiameter))
+    const clampedKm = Math.max(50, Math.min(330000, Math.max(lowBound, Math.min(highBound, targetFromDiameter))))
     return Math.round(clampedKm * 1000)
   }
 
   return 150000
 }
 
-let cachedDynamicLocations = MARS_LOCATIONS
-let fetchPromise = null
-
-export function loadMarsLocationsFromAssets() {
-  if (fetchPromise) return fetchPromise
-  fetchPromise = fetch('../data/mars_globe_locations.json')
-    .then((res) => (res.ok ? res.json() : null))
-    .then((json) => {
-      if (Array.isArray(json) && json.length > 0) {
-        cachedDynamicLocations = normalizeMarsLocations(json)
-      }
-      return cachedDynamicLocations
-    })
-    .catch(() => cachedDynamicLocations)
-  return fetchPromise
-}
-
 export function useMarsLocations() {
-  const [locations, setLocations] = useState(cachedDynamicLocations)
-
-  useEffect(() => {
-    let active = true
-    loadMarsLocationsFromAssets().then((list) => {
-      if (active && list) setLocations(list)
-    })
-    return () => {
-      active = false
-    }
-  }, [])
-
-  return locations
+  return MARS_LOCATIONS
 }
