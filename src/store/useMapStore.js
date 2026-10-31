@@ -1,7 +1,7 @@
 import { create } from 'zustand'
-import locations from '../data/locations.json'
+import { DEFAULT_LOCATION } from '../services/marsLocations'
 
 export const useMapStore = create((set) => ({
-  selected: locations[0],
+  selected: DEFAULT_LOCATION,
   setSelected: (selected) => set({ selected: selected ? { ...selected } : selected }),
 }))
