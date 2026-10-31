@@ -3,7 +3,7 @@ import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { Plus, Minus, Crosshair, RotateCcw, X } from 'lucide-react'
 import { TILE_LAYERS, ROVERS } from '../../services/layerService'
-import { MARS, at, applyLayer, guardCesiumViewer } from '../../services/tiles'
+import { MARS, at, applyLayer, ensureFallbackLayer, guardCesiumViewer } from '../../services/tiles'
 import {
   MARS_LOCATIONS,
   getIdealFlyHeightMeters,
@@ -100,6 +100,7 @@ function getSharedGlobe() {
   if ('msaaSamples' in scene) scene.msaaSamples = 1
 
   guardCesiumViewer(viewer)
+  ensureFallbackLayer(viewer)
 
   const ctrl = scene.screenSpaceCameraController
   ctrl.minimumZoomDistance = MIN_ZOOM_METERS
@@ -113,6 +114,7 @@ function getSharedGlobe() {
   const state = {
     container,
     viewer,
+    globeDrawn: false,
     appliedKey: null,
     disposeLayer: null,
     status: 'loading',
@@ -126,6 +128,24 @@ function getSharedGlobe() {
     startSpin: null,
     stopSpin: null,
   }
+
+  scene.globe.tileLoadProgressEvent.addEventListener(() => {
+    if (!viewer.isDestroyed()) {
+      scene.requestRender()
+    }
+  })
+
+  const checkGlobeDrawn = () => {
+    if (state.globeDrawn || viewer.isDestroyed()) return
+    const renderedTiles = scene.globe?._surface?._tilesToRender?.length || 0
+    if (renderedTiles > 0 && viewer.imageryLayers.length > 0) {
+      state.globeDrawn = true
+      scene.postRender.removeEventListener(checkGlobeDrawn)
+      scene.requestRender()
+      window.dispatchEvent(new Event('rm:ready'))
+    }
+  }
+  scene.postRender.addEventListener(checkGlobeDrawn)
 
   const spinStep = (now) => {
     if (!state.spinning || viewer.isDestroyed()) {
@@ -489,7 +509,7 @@ export default function MarsGlobe({
         if (!cancelled) {
           shared.status = s
           shared.onLayerState?.(s, undefined)
-          if (s === 'ok' || s === 'error') {
+          if (s === 'error' || (s === 'ok' && shared.globeDrawn)) {
             window.dispatchEvent(new Event('rm:ready'))
           }
         }
@@ -661,8 +681,19 @@ export default function MarsGlobe({
 
       let dirty = false
 
-      // >= 24,000 km: hide all points and location names
-      if (altKm >= HIDE_ALL_ALT_KM) {
+      const renderedTiles = viewer.scene.globe?._surface?._tilesToRender?.length || 0
+      const isGlobeSurfaceReady =
+        Boolean(sharedGlobe?.globeDrawn) ||
+        (renderedTiles > 0 && viewer.imageryLayers.length > 0)
+
+      if (isGlobeSurfaceReady && sharedGlobe && !sharedGlobe.globeDrawn) {
+        sharedGlobe.globeDrawn = true
+        window.dispatchEvent(new Event('rm:ready'))
+      }
+
+      // Wait until the globe quadtree has rendered its surface before showing location markers,
+      // and hide all points/labels when altitude >= 24,000 km
+      if (!isGlobeSurfaceReady || altKm >= HIDE_ALL_ALT_KM) {
         for (let i = 0; i < tracked.length; i++) {
           if (tracked[i].ent.show) {
             tracked[i].ent.show = false
