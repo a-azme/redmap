@@ -54,7 +54,7 @@ export default function SearchBar() {
             if (e.key === 'Enter' && results[0]) choose(results[0])
             if (e.key === 'Escape') setOpen(false)
           }}
-          placeholder="Search 439 Mars locations..."
+          placeholder="Search locations"
           className="min-w-0 flex-1 truncate bg-transparent text-base outline-none placeholder:text-muted sm:text-sm"
         />
         <Search size={16} className="shrink-0 text-muted" />
@@ -72,7 +72,7 @@ export default function SearchBar() {
                 className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-panel-2 border-b border-white/5 last:border-b-0"
               >
                 <span
-                  className="w-2.5 h-2.5 rounded-full shrink-0"
+                  className="h-2.5 w-2.5 shrink-0 aspect-square rounded-full"
                   style={{ background: loc.color }}
                 />
                 <span className="min-w-0 flex-1">
