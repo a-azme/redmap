@@ -75,6 +75,8 @@ export default function LayersPage() {
           onReset={() => clearFocus()}
           controlsClassName="right-3 top-3 sm:right-4 sm:top-4"
           legendClassName="bottom-[132px] left-1/2 -translate-x-1/2 xl:bottom-[142px]"
+          showCompass
+          compassClassName="bottom-9 left-8 hidden xl:flex"
         />
 
         {/* Left: Map Layers (desktop only, concise) */}
@@ -107,15 +109,6 @@ export default function LayersPage() {
             })}
           </div>
         </aside>
-
-        {/* Compass (desktop only) */}
-        <div className="absolute left-[272px] top-4 z-[1100] hidden h-16 w-16 items-center justify-center rounded-full border border-white/10 bg-black/60 backdrop-blur-md xl:flex">
-          <span className="absolute top-1 text-[9px] text-gray-300">N</span>
-          <span className="absolute bottom-1 text-[9px] text-gray-300">S</span>
-          <span className="absolute left-1.5 text-[9px] text-gray-300">W</span>
-          <span className="absolute right-1.5 text-[9px] text-gray-300">E</span>
-          <div className="h-0 w-0 border-x-[6px] border-b-[18px] border-x-transparent border-b-red-500" />
-        </div>
 
         {/* Location tooltip */}
         <div className={`absolute left-1/2 top-3 z-[1050] -translate-x-1/2 whitespace-nowrap px-3 py-1.5 xl:top-4 xl:px-3.5 xl:py-2 ${panel}`}>

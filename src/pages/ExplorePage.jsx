@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import {
   ArrowLeft,
+  ChevronLeft,
   ChevronRight,
   ChevronUp,
   ChevronDown,
@@ -65,10 +66,12 @@ export default function ExplorePage() {
   const storeFocus = useMapStore((s) => s.focusTarget)
   const detailsOpen = useMapStore((s) => s.detailsOpen)
   const sheetSnap = useMapStore((s) => s.sheetSnap)
+  const desktopDrawerOpen = useMapStore((s) => s.desktopDrawerOpen)
   const setSelected = useMapStore((s) => s.setSelected)
   const clearFocus = useMapStore((s) => s.clearFocus)
   const setDetailsOpen = useMapStore((s) => s.setDetailsOpen)
   const setSheetSnap = useMapStore((s) => s.setSheetSnap)
+  const setDesktopDrawerOpen = useMapStore((s) => s.setDesktopDrawerOpen)
   const selectWithDetails = useMapStore((s) => s.selectWithDetails)
 
   const [view, setView] = useState('3D Globe')
@@ -92,14 +95,32 @@ export default function ExplorePage() {
     }
   }, [detailsOpen, selected.id])
 
+  // Allow Escape key to close the open desktop Explore Mars drawer
+  useEffect(() => {
+    if (!desktopDrawerOpen) return
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setDesktopDrawerOpen(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [desktopDrawerOpen, setDesktopDrawerOpen])
+
   const handleMenuClick = (label) => {
+    if (label === 'Locations') {
+      const isDesktop = typeof window !== 'undefined' && window.innerWidth >= 1024
+      if (isDesktop) {
+        setDesktopDrawerOpen((prev) => !prev)
+      } else {
+        setSheetSnap((prev) => (prev === 'peek' ? 'half' : 'peek'))
+      }
+      return
+    }
+
     setView(label)
     if (label === '3D Globe') setMapMode('3D')
     else if (label === 'Map View') setMapMode('2D')
-    else if (label === 'Locations') {
-      setDetailsOpen(false)
-      setSheetSnap((prev) => (prev === 'peek' ? 'half' : prev))
-    }
   }
 
   const handleSelectLocation = useCallback(
@@ -166,8 +187,8 @@ export default function ExplorePage() {
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-bg text-white">
-      {/* Full-height globe container on mobile; left of sidebar on desktop */}
-      <div className="relative h-full w-full lg:absolute lg:inset-0 lg:right-[440px] lg:w-auto">
+      {/* Full-viewport globe container on both mobile and desktop */}
+      <div className="relative h-full w-full lg:absolute lg:inset-0">
         <MarsGlobe
           locations={locations}
           focus={storeFocus}
@@ -179,28 +200,45 @@ export default function ExplorePage() {
           onCameraChange={(altKm, level) => setCamState({ altKm, level })}
           onCenter={() => setSelected({ ...selected })}
           onReset={() => clearFocus()}
+          controlsClassName={`right-3 top-3 sm:right-4 sm:top-4 transition-all duration-300 ease-out ${
+            desktopDrawerOpen ? 'lg:right-[452px] lg:top-4' : 'lg:right-4 lg:top-4'
+          }`}
         />
 
         {/* Top-left mode switcher */}
         <aside
           className={`absolute left-2.5 top-2.5 z-10 flex overflow-hidden py-1 lg:left-4 lg:top-4 lg:block lg:w-[200px] lg:py-2 ${panel}`}
         >
-          {menu.map(({ label, icon: Icon }) => (
-            <button
-              key={label}
-              title={label}
-              aria-label={label}
-              onClick={() => handleMenuClick(label)}
-              className={`flex items-center gap-3 px-3 py-2.5 text-left text-sm font-bold transition lg:w-full lg:px-4 lg:py-3 ${
-                view === label
-                  ? 'bg-red-500/20 text-white'
-                  : 'text-gray-400 hover:bg-white/5 hover:text-white'
-              }`}
-            >
-              <Icon size={18} />
-              <span className="hidden lg:inline">{label}</span>
-            </button>
-          ))}
+          {menu.map(({ label, icon: Icon }) => {
+            const isLocations = label === 'Locations'
+            const isActive = isLocations ? false : view === label
+            return (
+              <button
+                key={label}
+                title={label}
+                aria-label={label}
+                onClick={() => handleMenuClick(label)}
+                className={`flex items-center gap-3 px-3 py-2.5 text-left text-sm font-bold transition lg:w-full lg:px-4 lg:py-3 ${
+                  isLocations
+                    ? `${
+                        sheetSnap !== 'peek'
+                          ? 'bg-red-500/20 text-white'
+                          : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                      } ${
+                        desktopDrawerOpen
+                          ? 'lg:bg-red-500/20 lg:text-white'
+                          : 'lg:bg-transparent lg:text-gray-400 lg:hover:bg-white/5 lg:hover:text-white'
+                      }`
+                    : isActive
+                    ? 'bg-red-500/20 text-white'
+                    : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                }`}
+              >
+                <Icon size={18} />
+                <span className="hidden lg:inline">{label}</span>
+              </button>
+            )
+          })}
         </aside>
 
         {/* Bottom-left live axis / coordinates */}
@@ -219,19 +257,48 @@ export default function ExplorePage() {
           </span>
         </div>
 
-        {/* Bottom-right distance metric scale (no border or card) */}
-        <div className="pointer-events-none absolute bottom-[74px] right-3 z-20 flex items-center gap-2 font-mono text-[11px] tabular-nums drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] sm:text-xs lg:bottom-5 lg:right-4">
+        {/* Bottom-right distance metric scale (no border or card), smoothly shifts when desktop drawer opens */}
+        <div
+          className={`pointer-events-none absolute bottom-[74px] right-3 z-20 flex items-center gap-2 font-mono text-[11px] tabular-nums drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] transition-all duration-300 ease-out sm:text-xs lg:bottom-5 ${
+            desktopDrawerOpen ? 'lg:right-[452px]' : 'lg:right-4'
+          }`}
+        >
           <span className="text-[11px] font-medium text-white/90 sm:text-xs">{scale.label}</span>
           <div
             className="h-1.5 border-b border-x border-white/90 transition-[width] duration-150"
             style={{ width: `${scale.widthPx}px` }}
           />
         </div>
+
+        {/* Compact vertically centered right-edge pill tab when desktop drawer is collapsed */}
+        <button
+          type="button"
+          onClick={() => setDesktopDrawerOpen(true)}
+          title="Open Explore Mars panel"
+          aria-label="Open Explore Mars panel"
+          className={`hidden lg:flex absolute right-0 top-1/2 z-20 -translate-y-1/2 items-center gap-2 rounded-l-2xl border border-r-0 border-white/15 bg-black/75 py-3 pl-3 pr-2.5 text-xs font-semibold text-gray-200 shadow-xl backdrop-blur-xl transition-all duration-300 ease-out hover:border-red-500/40 hover:bg-black/90 hover:pl-4 hover:text-white ${
+            desktopDrawerOpen
+              ? 'pointer-events-none translate-x-full opacity-0'
+              : 'translate-x-0 opacity-100'
+          }`}
+        >
+          <ChevronLeft size={16} className="text-red-400" />
+          <MapPin size={14} className="text-red-400" />
+          <span className="max-w-[160px] truncate tracking-wide">
+            {detailsOpen ? selected.name : 'Explore Mars'}
+          </span>
+        </button>
       </div>
 
-      {/* Expandable Bottom Sheet on Mobile / Right Panel on Desktop */}
+      {/* Expandable Bottom Sheet on Mobile / Content-Fit Slide-Over Right Drawer on Desktop */}
       <aside
-        className={`absolute inset-x-0 bottom-0 z-30 flex flex-col overflow-hidden rounded-t-3xl border-t border-white/15 bg-black/85 shadow-2xl backdrop-blur-xl transition-[height] duration-300 ease-out lg:bottom-4 lg:left-auto lg:right-4 lg:top-4 lg:h-auto lg:w-[420px] lg:rounded-2xl lg:border lg:border-white/10 lg:bg-black/65 ${SHEET_HEIGHTS[sheetSnap]}`}
+        className={`absolute inset-x-0 bottom-0 z-30 flex flex-col overflow-hidden rounded-t-3xl border-t border-white/15 bg-black/85 shadow-2xl backdrop-blur-xl transition-all duration-300 ease-out lg:bottom-auto lg:left-auto lg:right-4 lg:top-4 lg:h-auto lg:max-h-[calc(100%-2rem)] lg:w-[420px] lg:rounded-2xl lg:border lg:border-white/10 lg:bg-black/65 ${
+          SHEET_HEIGHTS[sheetSnap]
+        } ${
+          desktopDrawerOpen
+            ? 'lg:translate-x-0 lg:opacity-100'
+            : 'lg:pointer-events-none lg:translate-x-[calc(100%+2rem)] lg:opacity-0'
+        }`}
       >
         {/* Mobile Bottom Sheet Drag Handle Bar */}
         <div
@@ -264,18 +331,29 @@ export default function ExplorePage() {
         {/* Scrollable Sheet / Sidebar Body */}
         <div
           ref={scrollBodyRef}
-          className="flex-1 overflow-y-auto px-4 pb-6 pt-2 lg:p-5"
+          className="min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-2 lg:flex-initial lg:p-5"
         >
           {detailsOpen ? (
             /* ================= CLEAN LOCATION DETAILS VIEW ================= */
             <div>
-              <button
-                type="button"
-                onClick={() => setDetailsOpen(false)}
-                className="mb-3.5 inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
-              >
-                <ArrowLeft size={14} /> Back
-              </button>
+              <div className="mb-3.5 flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDetailsOpen(false)}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
+                >
+                  <ArrowLeft size={14} /> Back
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDesktopDrawerOpen(false)}
+                  title="Collapse panel (Esc)"
+                  aria-label="Collapse Explore Mars panel"
+                  className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-gray-300 transition hover:bg-white/10 hover:text-white lg:flex"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
 
               {/* Location Header */}
               <div className="flex items-center gap-3.5">
@@ -354,11 +432,22 @@ export default function ExplorePage() {
           ) : (
             /* ================= EXPLORE MARS LIST VIEW ================= */
             <div>
-              <div className="hidden items-baseline justify-between gap-2 lg:mb-1 lg:flex">
-                <h2 className="text-xl font-bold">Explore Mars</h2>
-                <span className="font-mono text-xs tabular-nums text-gray-400">
-                  {locations.length} features
-                </span>
+              <div className="hidden items-center justify-between gap-2 lg:mb-1.5 lg:flex">
+                <div className="flex items-baseline gap-2.5">
+                  <h2 className="text-xl font-bold">Explore Mars</h2>
+                  <span className="font-mono text-xs tabular-nums text-gray-400">
+                    {locations.length} features
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDesktopDrawerOpen(false)}
+                  title="Collapse panel (Esc)"
+                  aria-label="Collapse Explore Mars panel"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-gray-300 transition hover:bg-white/10 hover:text-white"
+                >
+                  <ChevronRight size={16} />
+                </button>
               </div>
               <p className="mb-3 text-xs text-gray-400 sm:text-sm">
                 Select a region, landform, or feature on the globe or from the list below.

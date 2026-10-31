@@ -83,10 +83,12 @@ const Badge = ({ type }) => (
 export default function MissionsPage() {
   const [filter, setFilter] = useState('all')
   const [selId, setSelId] = useState('perseverance')
+  const [history, setHistory] = useState([])
   const [focus, setFocus] = useState(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [sheetSnap, setSheetSnap] = useState('peek')
 
+  const desktopScrollRef = useRef(null)
   const scrollBodyRef = useRef(null)
   const touchStartYRef = useRef(null)
 
@@ -95,16 +97,46 @@ export default function MissionsPage() {
 
   useEffect(() => {
     if (detailsOpen) {
+      desktopScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
       scrollBodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
     }
   }, [detailsOpen, selId])
 
-  const select = (m) => {
+  // Selecting a mission from the left sidebar, mobile list, or globe pin starts a fresh view
+  const selectFromList = (m) => {
     if (!m) return
+    setHistory([])
     setSelId(m.id)
     setDetailsOpen(true)
     setSheetSnap((prev) => (prev === 'peek' ? 'half' : prev))
     if (m.lat != null) setFocus({ id: m.id, lat: m.lat, lon: m.lon })
+  }
+
+  // Selecting a related mission inside the right sidebar pushes the current mission onto history
+  const selectRelated = (m) => {
+    if (!m) return
+    if (m.id !== selId) {
+      setHistory((prev) => [...prev, selId])
+    }
+    setSelId(m.id)
+    setDetailsOpen(true)
+    setSheetSnap((prev) => (prev === 'peek' ? 'half' : prev))
+    if (m.lat != null) setFocus({ id: m.id, lat: m.lat, lon: m.lon })
+  }
+
+  // Back button steps back through related mission history; when no more back, collapses the right sidebar
+  const handleBack = () => {
+    if (history.length > 0) {
+      const prevId = history[history.length - 1]
+      const prevMission = byId(prevId)
+      setHistory((prev) => prev.slice(0, -1))
+      setSelId(prevId)
+      if (prevMission?.lat != null) {
+        setFocus({ id: prevMission.id, lat: prevMission.lat, lon: prevMission.lon })
+      }
+    } else {
+      setDetailsOpen(false)
+    }
   }
 
   const toggleSheetSnap = () => {
@@ -180,7 +212,7 @@ export default function MissionsPage() {
             <p className="mt-1 text-xs text-white/50">Orbiters have mapped {sel.site} from above. Tap one to see its mission.</p>
             <div className="mt-2 space-y-2">
               {ORBITAL_DATA.map((d) => (
-                <button key={d.mission + d.instrument} onClick={() => select(byId(d.mission))}
+                <button key={d.mission + d.instrument} onClick={() => selectRelated(byId(d.mission))}
                   className="w-full rounded-xl border border-white/10 bg-white/5 p-3 text-left hover:bg-white/10">
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-medium text-white">{byId(d.mission).name} · {d.instrument}</span>
@@ -196,7 +228,7 @@ export default function MissionsPage() {
               <h3 className="text-sm font-semibold text-red-400">Nearby surface missions</h3>
               <div className="mt-2 space-y-2">
                 {nearby.map(({ m, km }) => (
-                  <button key={m.id} onClick={() => select(m)}
+                  <button key={m.id} onClick={() => selectRelated(m)}
                     className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/5 p-3 text-left text-sm hover:bg-white/10">
                     <span>{m.name} <span className="text-xs text-white/50">· {m.site}</span></span>
                     <span className="text-xs text-white/60">~{Math.round(km)} km</span>
@@ -226,7 +258,7 @@ export default function MissionsPage() {
             <h3 className="text-sm font-semibold text-red-400">See it at a landing site</h3>
             <div className="mt-2 flex flex-wrap gap-2">
               {MISSIONS.filter((m) => m.lat != null).map((m) => (
-                <button key={m.id} onClick={() => select(m)}
+                <button key={m.id} onClick={() => selectRelated(m)}
                   className="rounded-full bg-white/5 px-3 py-1 text-xs text-white/80 hover:bg-white/10">{m.name}</button>
               ))}
             </div>
@@ -237,12 +269,39 @@ export default function MissionsPage() {
   )
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-bg text-white xl:grid xl:grid-cols-[320px_1fr_380px] xl:grid-rows-1 xl:gap-4 xl:p-4">
-      {/* Desktop Left Sidebar: mission list */}
-      <aside className="hidden flex-col rounded-2xl border border-white/10 bg-[#0b0e13] p-4 xl:flex xl:min-h-0">
-        <h2 className="text-lg font-semibold">NASA Missions</h2>
-        <p className="mt-1 text-xs text-white/50">Surface and orbital missions, combined by location.</p>
-        <div className="mt-3 flex flex-wrap gap-2">
+    <div className="relative h-full w-full overflow-hidden bg-bg text-white">
+      {/* Full-viewport globe container on both mobile and desktop */}
+      <main className="relative h-full w-full overflow-hidden bg-[#07090c]">
+        <MarsGlobe
+          locations={pins}
+          focus={focus}
+          onSelect={(d) => selectFromList(byId(d.id))}
+          onCenter={() => landed && setFocus({ id: sel.id, lat: sel.lat, lon: sel.lon })}
+          onReset={() => {
+            setFocus(null)
+            setHistory([])
+            setDetailsOpen(false)
+          }}
+          controlsClassName={`right-3 top-3 sm:right-4 sm:top-4 transition-all duration-300 ease-out ${
+            detailsOpen ? 'xl:right-[412px] xl:top-4' : 'xl:right-4 xl:top-4'
+          }`}
+        />
+        <div
+          className={`pointer-events-none absolute bottom-[74px] right-3 z-20 flex gap-3 rounded-lg border border-white/10 bg-black/60 px-3 py-1.5 text-[11px] text-white/70 backdrop-blur-md transition-all duration-300 ease-out xl:bottom-4 ${
+            detailsOpen ? 'xl:right-[412px]' : 'xl:right-4'
+          }`}
+        >
+          <span><i className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: TYPE_COLOR.rover }} />Rover</span>
+          <span><i className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: TYPE_COLOR.lander }} />Lander</span>
+          <span className="hidden text-white/40 sm:inline">Orbiters cover the whole planet</span>
+        </div>
+      </main>
+
+      {/* Desktop Persistent Left Sidebar: mission list (height = min(content, screen height)) */}
+      <aside className="hidden xl:absolute xl:bottom-auto xl:left-4 xl:top-4 xl:z-20 xl:flex xl:h-auto xl:max-h-[calc(100%-2rem)] xl:w-[320px] xl:flex-col overflow-hidden rounded-2xl border border-white/10 bg-black/65 p-4 backdrop-blur-md">
+        <h2 className="shrink-0 text-lg font-semibold">NASA Missions</h2>
+        <p className="mt-1 shrink-0 text-xs text-white/50">Surface and orbital missions, combined by location.</p>
+        <div className="mt-3 flex shrink-0 flex-wrap gap-2">
           {['all', 'rover', 'lander', 'orbiter'].map((f) => (
             <button key={f} onClick={() => setFilter(f)}
               className={`rounded-full px-3 py-1 text-xs font-bold capitalize ${filter === f ? 'bg-red-500 text-white' : 'bg-white/5 text-white/70 hover:bg-white/10'}`}>
@@ -250,10 +309,10 @@ export default function MissionsPage() {
             </button>
           ))}
         </div>
-        <div className="mt-3 flex-1 space-y-2 overflow-y-auto pr-1">
+        <div className="mt-3 min-h-0 space-y-2 overflow-y-auto pr-1">
           {filteredMissions.map((m) => (
-            <button key={m.id} onClick={() => select(m)}
-              className={`w-full rounded-xl border p-3 text-left transition ${selId === m.id ? 'border-red-500/60 bg-red-500/10' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}>
+            <button key={m.id} onClick={() => selectFromList(m)}
+              className={`w-full rounded-xl border p-3 text-left transition ${detailsOpen && selId === m.id ? 'border-red-500/60 bg-red-500/10' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}>
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium">{m.name}</span>
                 <Badge type={m.type} />
@@ -264,28 +323,24 @@ export default function MissionsPage() {
         </div>
       </aside>
 
-      {/* Center (Desktop) / Full-height (Mobile): globe */}
-      <main className="relative h-full w-full overflow-hidden bg-[#07090c] xl:min-h-0 xl:rounded-2xl xl:border xl:border-white/10">
-        <MarsGlobe
-          locations={pins}
-          focus={focus}
-          onSelect={(d) => select(byId(d.id))}
-          onCenter={() => landed && setFocus({ id: sel.id, lat: sel.lat, lon: sel.lon })}
-          onReset={() => {
-            setFocus(null)
-            setDetailsOpen(false)
-          }}
-        />
-        <div className="pointer-events-none absolute bottom-[74px] right-3 z-20 flex gap-3 rounded-lg border border-white/10 bg-black/60 px-3 py-1.5 text-[11px] text-white/70 backdrop-blur-md xl:bottom-3">
-          <span><i className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: TYPE_COLOR.rover }} />Rover</span>
-          <span><i className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: TYPE_COLOR.lander }} />Lander</span>
-          <span className="hidden text-white/40 sm:inline">Orbiters cover the whole planet</span>
+      {/* Desktop On-Demand Right Sidebar: appears only when a mission is selected, content-fit height, Back button only */}
+      <aside
+        className={`hidden xl:flex xl:flex-col xl:absolute xl:right-4 xl:top-4 xl:bottom-auto xl:z-20 xl:w-[380px] xl:h-auto xl:max-h-[calc(100%-2rem)] overflow-hidden rounded-2xl border border-white/10 bg-black/65 shadow-2xl backdrop-blur-md transition-all duration-300 ease-out ${
+          detailsOpen
+            ? 'xl:translate-x-0 xl:opacity-100'
+            : 'xl:pointer-events-none xl:translate-x-[calc(100%+2rem)] xl:opacity-0'
+        }`}
+      >
+        <div ref={desktopScrollRef} className="min-h-0 overflow-y-auto p-4">
+          <button
+            type="button"
+            onClick={handleBack}
+            className="mb-3.5 inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
+          >
+            <ArrowLeft size={14} /> Back
+          </button>
+          {renderMissionDetails()}
         </div>
-      </main>
-
-      {/* Desktop Right Sidebar: detail + multi-mission data */}
-      <aside className="hidden rounded-2xl border border-white/10 bg-[#0b0e13] p-4 xl:block xl:min-h-0 xl:overflow-y-auto">
-        {renderMissionDetails()}
       </aside>
 
       {/* Mobile Expandable Bottom Sheet */}
@@ -324,7 +379,7 @@ export default function MissionsPage() {
             <div>
               <button
                 type="button"
-                onClick={() => setDetailsOpen(false)}
+                onClick={handleBack}
                 className="mb-3.5 inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
               >
                 <ArrowLeft size={14} /> Back
@@ -357,9 +412,9 @@ export default function MissionsPage() {
                   <button
                     key={m.id}
                     type="button"
-                    onClick={() => select(m)}
+                    onClick={() => selectFromList(m)}
                     className={`w-full rounded-xl border p-3 text-left transition ${
-                      selId === m.id
+                      detailsOpen && selId === m.id
                         ? 'border-red-500/60 bg-red-500/10'
                         : 'border-white/10 bg-white/5 hover:bg-white/10'
                     }`}

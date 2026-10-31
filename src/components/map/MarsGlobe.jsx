@@ -156,18 +156,37 @@ function getSharedGlobe() {
     }
   }
 
+  const scratchClientPos = new Cesium.Cartesian2()
+  const scratchHoverCarto = new Cesium.Cartographic()
+  let isPointerDown = false
+  let moveRaf = 0
+  let latestEndPos = null
+  let lastPickTime = 0
+  let lastIsPin = false
+  let lastHoverLat = null
+  let lastHoverLon = null
+
   const isClientPosOnGlobe = (clientX, clientY) => {
     if (viewer.isDestroyed() || scene.mode !== Cesium.SceneMode.SCENE3D) return true
     const rect = scene.canvas.getBoundingClientRect()
     if (rect.width <= 0 || rect.height <= 0) return false
-    const pos = new Cesium.Cartesian2(clientX - rect.left, clientY - rect.top)
-    return Boolean(viewer.camera.pickEllipsoid(pos, MARS))
+    scratchClientPos.x = clientX - rect.left
+    scratchClientPos.y = clientY - rect.top
+    return Boolean(viewer.camera.pickEllipsoid(scratchClientPos, MARS))
   }
 
   container.addEventListener(
     'pointerdown',
     (e) => {
+      isPointerDown = true
       if (isClientPosOnGlobe(e.clientX, e.clientY)) state.stopSpin()
+    },
+    { passive: true }
+  )
+  window.addEventListener(
+    'pointerup',
+    () => {
+      isPointerDown = false
     },
     { passive: true }
   )
@@ -191,9 +210,12 @@ function getSharedGlobe() {
   container.addEventListener(
     'pointerleave',
     () => {
+      isPointerDown = false
       if (!viewer.isDestroyed() && scene.canvas) {
         scene.canvas.style.cursor = 'default'
       }
+      lastHoverLat = null
+      lastHoverLon = null
       state.onHoverCoord?.(null)
     },
     { passive: true }
@@ -216,27 +238,48 @@ function getSharedGlobe() {
 
   handler.setInputAction((movement) => {
     if (viewer.isDestroyed() || !movement?.endPosition) return
-    const picked = scene.pick(movement.endPosition)
-    const id = picked && picked.id && picked.id.id
-    const isPin = typeof id === 'string' && id.startsWith('loc-')
+    latestEndPos = movement.endPosition
+    if (moveRaf) return
+    moveRaf = requestAnimationFrame((now) => {
+      moveRaf = 0
+      if (viewer.isDestroyed() || !latestEndPos) return
 
-    const cartesian = viewer.camera.pickEllipsoid(movement.endPosition, MARS)
-    if (cartesian) {
-      const carto = MARS.cartesianToCartographic(cartesian)
-      if (carto) {
-        const lat = Cesium.Math.toDegrees(carto.latitude)
-        const lon = Cesium.Math.toDegrees(carto.longitude)
-        state.onHoverCoord?.({ lat, lon })
+      // Avoid expensive gl.readPixels scene.pick while dragging or more than ~16 times/sec
+      if (!isPointerDown && now - lastPickTime >= 60) {
+        lastPickTime = now
+        const picked = scene.pick(latestEndPos)
+        const id = picked && picked.id && picked.id.id
+        lastIsPin = typeof id === 'string' && id.startsWith('loc-')
       }
-      scene.canvas.style.cursor = isPin
-        ? 'pointer'
-        : state.enableCrosshair
-        ? 'crosshair'
-        : 'grab'
-    } else {
-      state.onHoverCoord?.(null)
-      scene.canvas.style.cursor = isPin ? 'pointer' : 'default'
-    }
+
+      const cartesian = viewer.camera.pickEllipsoid(latestEndPos, MARS)
+      if (cartesian) {
+        if (state.onHoverCoord) {
+          const carto = MARS.cartesianToCartographic(cartesian, scratchHoverCarto)
+          if (carto) {
+            const lat = Math.round(Cesium.Math.toDegrees(carto.latitude) * 100) / 100
+            const lon = Math.round(Cesium.Math.toDegrees(carto.longitude) * 100) / 100
+            if (lat !== lastHoverLat || lon !== lastHoverLon) {
+              lastHoverLat = lat
+              lastHoverLon = lon
+              state.onHoverCoord({ lat, lon })
+            }
+          }
+        }
+        scene.canvas.style.cursor = lastIsPin
+          ? 'pointer'
+          : state.enableCrosshair
+          ? 'crosshair'
+          : 'grab'
+      } else {
+        if (lastHoverLat !== null || lastHoverLon !== null) {
+          lastHoverLat = null
+          lastHoverLon = null
+          state.onHoverCoord?.(null)
+        }
+        scene.canvas.style.cursor = lastIsPin ? 'pointer' : 'default'
+      }
+    })
   }, Cesium.ScreenSpaceEventType.MOUSE_MOVE)
 
   sharedGlobe = state
@@ -256,9 +299,12 @@ export default function MarsGlobe({
   onCameraChange,
   controlsClassName,
   legendClassName,
+  showCompass = false,
+  compassClassName,
 }) {
   const elRef = useRef(null)
   const viewerRef = useRef(null)
+  const compassDialRef = useRef(null)
   const onSelectRef = useRef(onSelect)
   const onHoverCoordRef = useRef(onHoverCoord)
   const enableCrosshairRef = useRef(enableCrosshair)
@@ -499,8 +545,8 @@ export default function MarsGlobe({
       const isMissionHub = item.category === 'NASA_MISSION_HUB'
       const isNasa = Boolean(item.is_nasa)
 
-      // Concise pointer dot (omitted for Level 1 regional areas)
-      const pixelSize = isMissionHub ? 6.5 : isNasa ? 5.5 : 5
+      // Concise, symmetrically round pointer dot (omitted for Level 1 regional areas)
+      const pixelSize = isMissionHub ? 8 : 6
       const baseColor = Cesium.Color.fromCssColorString(color)
 
       const ent = viewer.entities.add({
@@ -513,7 +559,7 @@ export default function MarsGlobe({
               pixelSize,
               color: baseColor,
               outlineColor: Cesium.Color.WHITE,
-              outlineWidth: 1.25,
+              outlineWidth: 1.5,
               disableDepthTestDistance: Number.POSITIVE_INFINITY,
             },
         label: {
@@ -601,6 +647,16 @@ export default function MarsGlobe({
         lastReportedAlt = altKm
         const activeLevel = altKm > 3200 ? 1 : altKm > 1100 ? 2 : 3
         onCameraChangeRef.current(Math.round(altKm), activeLevel)
+      }
+
+      if (compassDialRef.current) {
+        const cam = viewer.camera
+        const rx = cam.rightWC.z
+        const ry = cam.upWC.z
+        const angleRad =
+          rx * rx + ry * ry > 1e-6 ? Math.atan2(rx, ry) : -(cam.heading || 0)
+        const angleDeg = Cesium.Math.toDegrees(angleRad)
+        compassDialRef.current.style.transform = `rotate(${angleDeg.toFixed(2)}deg)`
       }
 
       let dirty = false
@@ -816,6 +872,39 @@ export default function MarsGlobe({
     viewer.scene.requestRender()
   }
 
+  const handleNorthUp = () => {
+    const viewer = viewerRef.current || sharedGlobe?.viewer
+    if (!viewer || viewer.isDestroyed()) return
+    sharedGlobe?.stopSpin()
+    const cam = viewer.camera
+    if (viewer.scene.mode === Cesium.SceneMode.SCENE2D) {
+      cam.flyTo({
+        destination: cam.positionWC,
+        orientation: {
+          heading: 0,
+          pitch: cam.pitch,
+          roll: 0,
+        },
+        duration: 0.55,
+      })
+    } else {
+      const carto = cam.positionCartographic
+      const lon = Cesium.Math.toDegrees(carto.longitude)
+      const lat = Cesium.Math.toDegrees(carto.latitude)
+      const height = carto.height
+      cam.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(lon, lat, height, MARS),
+        orientation: {
+          heading: 0,
+          pitch: -Cesium.Math.PI_OVER_TWO,
+          roll: 0,
+        },
+        duration: 0.55,
+      })
+    }
+    viewer.scene.requestRender()
+  }
+
   const msg = {
     loading: 'Checking NASA tile sources...',
     ok: 'NASA Mars Trek data',
@@ -850,6 +939,48 @@ export default function MarsGlobe({
           <RotateCcw size={18} />
         </button>
       </div>
+
+      {/* Live Direction Compass (North-Up on tap without changing altitude/zoom) */}
+      {showCompass && (
+        <button
+          type="button"
+          onClick={handleNorthUp}
+          title="Orient North up"
+          aria-label="Orient North up"
+          className={`group absolute z-20 h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-black/70 shadow-xl backdrop-blur-md transition hover:border-red-500/40 hover:bg-black/85 active:scale-95 ${
+            compassClassName || 'bottom-9 left-8 hidden xl:flex'
+          }`}
+        >
+          <div
+            ref={compassDialRef}
+            className="relative flex h-full w-full items-center justify-center will-change-transform"
+          >
+            {/* Cardinal Labels */}
+            <span className="absolute top-1 text-[8px] font-extrabold leading-none tracking-tighter text-red-400">
+              N
+            </span>
+            <span className="absolute bottom-1 text-[7.5px] font-semibold leading-none text-white/45">
+              S
+            </span>
+            <span className="absolute left-1.5 text-[7.5px] font-semibold leading-none text-white/45">
+              W
+            </span>
+            <span className="absolute right-1.5 text-[7.5px] font-semibold leading-none text-white/45">
+              E
+            </span>
+
+            {/* Precision Dual-Tone Needle */}
+            <svg viewBox="0 0 32 32" className="h-6 w-6 drop-shadow">
+              {/* North Pointer (Red) */}
+              <polygon points="16,4 19,16 16,14.5 13,16" fill="#ef4444" />
+              {/* South Pointer (Muted Silver) */}
+              <polygon points="16,28 19,16 16,17.5 13,16" fill="rgba(255,255,255,0.35)" />
+              {/* Center Pivot Cap */}
+              <circle cx="16" cy="16" r="2" fill="#0f172a" stroke="#ffffff" strokeWidth="1.2" />
+            </svg>
+          </div>
+        </button>
+      )}
 
       {showCard && cardVisible && (
         <div
