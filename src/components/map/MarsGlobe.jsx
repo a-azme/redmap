@@ -125,6 +125,8 @@ function getSharedGlobe() {
     used: '',
     locations: [],
     onSelect: null,
+    onHoverCoord: null,
+    enableCrosshair: false,
     onLayerState: null,
     spinning: false,
     startSpin: null,
@@ -192,6 +194,16 @@ function getSharedGlobe() {
     },
     { passive: true }
   )
+  container.addEventListener(
+    'pointerleave',
+    () => {
+      if (!viewer.isDestroyed() && scene.canvas) {
+        scene.canvas.style.cursor = 'default'
+      }
+      state.onHoverCoord?.(null)
+    },
+    { passive: true }
+  )
 
   state.startSpin()
 
@@ -208,6 +220,31 @@ function getSharedGlobe() {
     }
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
 
+  handler.setInputAction((movement) => {
+    if (viewer.isDestroyed() || !movement?.endPosition) return
+    const picked = scene.pick(movement.endPosition)
+    const id = picked && picked.id && picked.id.id
+    const isPin = typeof id === 'string' && id.startsWith('loc-')
+
+    const cartesian = viewer.camera.pickEllipsoid(movement.endPosition, MARS)
+    if (cartesian) {
+      const carto = MARS.cartesianToCartographic(cartesian)
+      if (carto) {
+        const lat = Cesium.Math.toDegrees(carto.latitude)
+        const lon = Cesium.Math.toDegrees(carto.longitude)
+        state.onHoverCoord?.({ lat, lon })
+      }
+      scene.canvas.style.cursor = isPin
+        ? 'pointer'
+        : state.enableCrosshair
+        ? 'crosshair'
+        : 'grab'
+    } else {
+      state.onHoverCoord?.(null)
+      scene.canvas.style.cursor = isPin ? 'pointer' : 'default'
+    }
+  }, Cesium.ScreenSpaceEventType.MOUSE_MOVE)
+
   sharedGlobe = state
   return sharedGlobe
 }
@@ -216,6 +253,8 @@ export default function MarsGlobe({
   locations = MARS_LOCATIONS,
   focus,
   onSelect,
+  onHoverCoord,
+  enableCrosshair = false,
   layer,
   mode = '3D',
   onCenter,
@@ -226,6 +265,8 @@ export default function MarsGlobe({
   const elRef = useRef(null)
   const viewerRef = useRef(null)
   const onSelectRef = useRef(onSelect)
+  const onHoverCoordRef = useRef(onHoverCoord)
+  const enableCrosshairRef = useRef(enableCrosshair)
   const onCameraChangeRef = useRef(onCameraChange)
   const locRef = useRef(locations)
   const prevFocusRef = useRef(focus)
@@ -251,15 +292,19 @@ export default function MarsGlobe({
     onCameraChangeRef.current = onCameraChange
   }, [onCameraChange])
 
-  // Keep singleton click handler synced with the currently mounted page
+  // Keep singleton click & hover handlers synced with the currently mounted page
   useEffect(() => {
     onSelectRef.current = onSelect
+    onHoverCoordRef.current = onHoverCoord
+    enableCrosshairRef.current = enableCrosshair
     locRef.current = locations
     if (sharedGlobe) {
       sharedGlobe.locations = locations
       sharedGlobe.onSelect = onSelect
+      sharedGlobe.onHoverCoord = onHoverCoord
+      sharedGlobe.enableCrosshair = enableCrosshair
     }
-  }, [locations, onSelect])
+  }, [locations, onSelect, onHoverCoord, enableCrosshair])
 
   // Show concise description card on layer change and auto-hide after 5s
   useEffect(() => {
@@ -281,6 +326,8 @@ export default function MarsGlobe({
     const shared = getSharedGlobe()
     shared.locations = locRef.current
     shared.onSelect = (loc) => onSelectRef.current?.(loc)
+    shared.onHoverCoord = (coord) => onHoverCoordRef.current?.(coord)
+    shared.enableCrosshair = enableCrosshairRef.current
 
     host.appendChild(shared.container)
     viewerRef.current = shared.viewer

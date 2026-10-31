@@ -105,14 +105,14 @@ const cache = new Map()
 export default function LocationThumb({ loc, className = '' }) {
   const elRef = useRef(null)
   const [visible, setVisible] = useState(() => cache.has(loc.id))
-  const [src, setSrc] = useState(null)
+  const [thumb, setThumb] = useState({ id: null, url: null })
 
   useEffect(() => {
     if (visible) return
     const el = elRef.current
     if (!el || typeof IntersectionObserver === 'undefined') {
-      setVisible(true)
-      return
+      const t = setTimeout(() => setVisible(true), 0)
+      return () => clearTimeout(t)
     }
     const io = new IntersectionObserver(
       (entries) => {
@@ -130,15 +130,16 @@ export default function LocationThumb({ loc, className = '' }) {
   useEffect(() => {
     if (!visible) return
     let alive = true
-    setSrc(null)
     if (!cache.has(loc.id)) cache.set(loc.id, build(loc))
     cache.get(loc.id).then((u) => {
-      if (alive) setSrc(u)
+      if (alive) setThumb({ id: loc.id, url: u })
     })
     return () => {
       alive = false
     }
   }, [loc.id, visible]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const src = thumb.id === loc.id ? thumb.url : null
 
   return (
     <div
