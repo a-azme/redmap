@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Search } from 'lucide-react'
-import locations from '../../data/locations.json'
+import { useMarsLocations } from '../../services/marsLocations'
 import { useMapStore } from '../../store/useMapStore'
 
 export default function SearchBar() {
@@ -9,14 +9,20 @@ export default function SearchBar() {
   const [open, setOpen] = useState(false)
   const boxRef = useRef(null)
   const navigate = useNavigate()
-  const setSelected = useMapStore((s) => s.setSelected)
+  const locations = useMarsLocations()
+  const selectWithDetails = useMapStore((s) => s.selectWithDetails)
 
   const q = query.trim().toLowerCase()
-  const results = q
-    ? locations.filter((l) =>
-        [l.name, l.type, l.tag].some((v) => v.toLowerCase().includes(q))
+  const results = useMemo(() => {
+    if (!q) return []
+    return locations
+      .filter((l) =>
+        [l.name, l.type, l.tag, l.category].some(
+          (v) => v && String(v).toLowerCase().includes(q)
+        )
       )
-    : []
+      .slice(0, 12)
+  }, [locations, q])
 
   useEffect(() => {
     const close = (e) => {
@@ -27,10 +33,10 @@ export default function SearchBar() {
   }, [])
 
   const choose = (loc) => {
-    setSelected(loc)
     setQuery('')
     setOpen(false)
     navigate('/')
+    setTimeout(() => selectWithDetails(loc), 0)
   }
 
   return (
@@ -48,14 +54,14 @@ export default function SearchBar() {
             if (e.key === 'Enter' && results[0]) choose(results[0])
             if (e.key === 'Escape') setOpen(false)
           }}
-          placeholder="Search location..."
+          placeholder="Search locations"
           className="min-w-0 flex-1 truncate bg-transparent text-base outline-none placeholder:text-muted sm:text-sm"
         />
         <Search size={16} className="shrink-0 text-muted" />
       </div>
 
       {open && q && (
-        <div className="absolute top-12 right-0 w-72 max-w-[calc(100vw-1.5rem)] bg-panel border border-line rounded-xl overflow-hidden z-50 shadow-xl">
+        <div className="absolute top-12 right-0 w-80 max-h-96 overflow-y-auto max-w-[calc(100vw-1.5rem)] bg-panel border border-line rounded-xl z-50 shadow-xl">
           {results.length === 0 ? (
             <div className="px-4 py-3 text-sm text-muted">No location found</div>
           ) : (
@@ -63,16 +69,23 @@ export default function SearchBar() {
               <button
                 key={loc.id}
                 onClick={() => choose(loc)}
-                className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-panel-2"
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-panel-2 border-b border-white/5 last:border-b-0"
               >
                 <span
-                  className="w-2.5 h-2.5 rounded-full shrink-0"
+                  className="h-2.5 w-2.5 shrink-0 aspect-square rounded-full"
                   style={{ background: loc.color }}
                 />
-                <span className="flex-1">
-                  <span className="block text-sm font-medium">{loc.name}</span>
-                  <span className="block text-xs text-muted">
-                    {loc.type} • {loc.tag}
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="truncate text-sm font-medium">{loc.name}</span>
+                    <span className="shrink-0 rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-gray-300">
+                      L{loc.level}
+                    </span>
+                  </span>
+                  <span className="block truncate text-xs text-muted">
+                    {loc.type}
+                    {loc.diameter > 0 ? ` • Ø ${loc.diameter} km` : ' • Mission Hub'}
+                    {` • ${loc.min_alt_km}–${loc.max_alt_km} km`}
                   </span>
                 </span>
               </button>

@@ -3,7 +3,7 @@ import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { Plus, Minus, Crosshair, RotateCcw } from 'lucide-react'
 import { TILE_LAYERS } from '../../services/layerService'
-import { MARS, at, toLon, applyLayer } from '../../services/tiles'
+import { MARS, at, toLon, applyLayer, guardCesiumViewer } from '../../services/tiles'
 import { LOCATIONS } from './routeUtils'
 import { hazardRectangle, renderHazardCanvas } from '../../lib/hazardImage.js'
 
@@ -113,6 +113,8 @@ export default function RouteMap({ route, hazard = 'off', layer = 'terrain', mod
     if ('msaaSamples' in scene) scene.msaaSamples = 1 // no multisampling; the route line is smooth enough
     scene.globe.maximumScreenSpaceError = 3
 
+    const unguard = guardCesiumViewer(viewer)
+
     const ctrl = scene.screenSpaceCameraController
     ctrl.minimumZoomDistance = 500
     ctrl.maximumZoomDistance = 4e7
@@ -134,6 +136,7 @@ export default function RouteMap({ route, hazard = 'off', layer = 'terrain', mod
 
     viewerRef.current = viewer
     return () => {
+      unguard()
       handler.destroy()
       viewer.destroy()
       viewerRef.current = null
@@ -147,12 +150,15 @@ export default function RouteMap({ route, hazard = 'off', layer = 'terrain', mod
     let cancelled = false
     setStatus('loading')
     setUsed('')
-    applyLayer(viewer, cfg, layer, {
+    const dispose = applyLayer(viewer, cfg, layer, {
       cancelled: () => cancelled,
       onStatus: (s) => !cancelled && setStatus(s),
       onSource: (n) => !cancelled && setUsed(n),
     })
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      if (typeof dispose === 'function') dispose()
+    }
   }, [layer]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---- 3. route + markers ---- */

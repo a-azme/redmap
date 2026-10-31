@@ -1,7 +1,14 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react'
 import MarsGlobe from '../components/map/MarsGlobe'
 
 const TYPE_COLOR = { rover: '#ff5a4f', lander: '#f5a524', orbiter: '#5aa9ff' }
+
+const SHEET_HEIGHTS = {
+  peek: 'h-[64px]',
+  half: 'h-[50%]',
+  full: 'h-[85%]',
+}
 
 const MISSIONS = [
   { id: 'viking1', name: 'Viking 1', type: 'lander', years: '1976–1982', site: 'Chryse Planitia', lat: 22.27, lon: -47.95,
@@ -76,18 +83,94 @@ const Badge = ({ type }) => (
 export default function MissionsPage() {
   const [filter, setFilter] = useState('all')
   const [selId, setSelId] = useState('perseverance')
-  const [focus, setFocus] = useState({ lat: 18.44, lon: 77.45 })
+  const [history, setHistory] = useState([])
+  const [focus, setFocus] = useState(null)
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const [sheetSnap, setSheetSnap] = useState('peek')
+
+  const desktopScrollRef = useRef(null)
+  const scrollBodyRef = useRef(null)
+  const touchStartYRef = useRef(null)
+
   const sel = byId(selId)
   const landed = sel.lat != null
 
-  const select = (m) => {
+  useEffect(() => {
+    if (detailsOpen) {
+      desktopScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+      scrollBodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  }, [detailsOpen, selId])
+
+  // Selecting a mission from the left sidebar, mobile list, or globe pin starts a fresh view
+  const selectFromList = (m) => {
+    if (!m) return
+    setHistory([])
     setSelId(m.id)
-    if (m.lat != null) setFocus({ lat: m.lat, lon: m.lon })
+    setDetailsOpen(true)
+    setSheetSnap((prev) => (prev === 'peek' ? 'half' : prev))
+    if (m.lat != null) setFocus({ id: m.id, lat: m.lat, lon: m.lon })
+  }
+
+  // Selecting a related mission inside the right sidebar pushes the current mission onto history
+  const selectRelated = (m) => {
+    if (!m) return
+    if (m.id !== selId) {
+      setHistory((prev) => [...prev, selId])
+    }
+    setSelId(m.id)
+    setDetailsOpen(true)
+    setSheetSnap((prev) => (prev === 'peek' ? 'half' : prev))
+    if (m.lat != null) setFocus({ id: m.id, lat: m.lat, lon: m.lon })
+  }
+
+  // Back button steps back through related mission history; when no more back, collapses the right sidebar
+  const handleBack = () => {
+    if (history.length > 0) {
+      const prevId = history[history.length - 1]
+      const prevMission = byId(prevId)
+      setHistory((prev) => prev.slice(0, -1))
+      setSelId(prevId)
+      if (prevMission?.lat != null) {
+        setFocus({ id: prevMission.id, lat: prevMission.lat, lon: prevMission.lon })
+      }
+    } else {
+      setDetailsOpen(false)
+    }
+  }
+
+  const toggleSheetSnap = () => {
+    setSheetSnap((prev) => (prev === 'peek' ? 'half' : 'peek'))
+  }
+
+  const handleTouchStart = (e) => {
+    if (e.touches && e.touches.length === 1) {
+      touchStartYRef.current = e.touches[0].clientY
+    }
+  }
+
+  const handleTouchEnd = (e) => {
+    if (touchStartYRef.current === null || !e.changedTouches?.[0]) return
+    const dy = touchStartYRef.current - e.changedTouches[0].clientY
+    touchStartYRef.current = null
+    if (Math.abs(dy) < 28) return
+    if (dy > 0) {
+      setSheetSnap((prev) => (prev === 'peek' ? 'half' : 'full'))
+    } else {
+      setSheetSnap((prev) => (prev === 'full' ? 'half' : 'peek'))
+    }
   }
 
   const pins = useMemo(
     () => MISSIONS.filter((m) => m.lat != null && (filter === 'all' || filter === m.type))
-      .map((m) => ({ id: m.id, name: m.name, lat: m.lat, lon: m.lon, color: TYPE_COLOR[m.type] })),
+      .map((m) => ({
+        id: m.id,
+        name: m.name,
+        lat: m.lat,
+        lon: m.lon,
+        color: TYPE_COLOR[m.type],
+        category: 'NASA_MISSION_HUB',
+      })),
     [filter]
   )
 
@@ -98,24 +181,138 @@ export default function MissionsPage() {
         .sort((a, b) => a.km - b.km)
     : []
 
-  return (
-    <div className="grid h-full grid-cols-1 content-start gap-4 overflow-y-auto p-3 text-white xl:grid-cols-[320px_1fr_380px] xl:grid-rows-1 xl:overflow-hidden xl:p-4">
-      {/* Left: mission list */}
-      <aside className="flex flex-col rounded-2xl border border-white/10 bg-[#0b0e13] p-4 xl:min-h-0">
-        <h2 className="text-lg font-semibold">NASA Missions</h2>
-        <p className="mt-1 text-xs text-white/50">Surface and orbital missions, combined by location.</p>
+  const filteredMissions = useMemo(
+    () => MISSIONS.filter((m) => filter === 'all' || m.type === filter),
+    [filter]
+  )
+
+  const renderMissionDetails = () => (
+    <div className="space-y-4">
+      <div>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-xl font-semibold">{sel.name}</h2>
+          <Badge type={sel.type} />
+        </div>
+        <p className="mt-1 text-xs text-white/50">
+          {sel.site} · {sel.years}
+          {landed && ` · ${Math.abs(sel.lat).toFixed(2)}°${sel.lat >= 0 ? 'N' : 'S'}, ${(((sel.lon % 360) + 360) % 360).toFixed(2)}°E`}
+        </p>
+        <p className="mt-3 text-sm text-white/80">{sel.summary}</p>
         <div className="mt-3 flex flex-wrap gap-2">
+          {sel.instruments.map((i) => (
+            <span key={i} className="rounded-md bg-white/5 px-2 py-1 text-xs text-white/70">{i}</span>
+          ))}
+        </div>
+      </div>
+
+      {landed ? (
+        <>
+          <section>
+            <h3 className="text-sm font-semibold text-red-400">Data from other missions at this location</h3>
+            <p className="mt-1 text-xs text-white/50">Orbiters have mapped {sel.site} from above. Tap one to see its mission.</p>
+            <div className="mt-2 space-y-2">
+              {ORBITAL_DATA.map((d) => (
+                <button key={d.mission + d.instrument} onClick={() => selectRelated(byId(d.mission))}
+                  className="w-full rounded-xl border border-white/10 bg-white/5 p-3 text-left hover:bg-white/10">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-medium text-white">{byId(d.mission).name} · {d.instrument}</span>
+                    <span className="rounded bg-white/10 px-1.5 py-0.5 text-white/60">{d.layer}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-white/60">{d.shows}</p>
+                </button>
+              ))}
+            </div>
+          </section>
+          {nearby.length > 0 && (
+            <section>
+              <h3 className="text-sm font-semibold text-red-400">Nearby surface missions</h3>
+              <div className="mt-2 space-y-2">
+                {nearby.map(({ m, km }) => (
+                  <button key={m.id} onClick={() => selectRelated(m)}
+                    className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/5 p-3 text-left text-sm hover:bg-white/10">
+                    <span>{m.name} <span className="text-xs text-white/50">· {m.site}</span></span>
+                    <span className="text-xs text-white/60">~{Math.round(km)} km</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+        </>
+      ) : (
+        <>
+          <section>
+            <h3 className="text-sm font-semibold text-red-400">Datasets from this mission</h3>
+            <div className="mt-2 space-y-2">
+              {ORBITAL_DATA.filter((d) => d.mission === sel.id).map((d) => (
+                <div key={d.instrument} className="rounded-xl border border-white/10 bg-white/5 p-3">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-medium">{d.instrument}</span>
+                    <span className="rounded bg-white/10 px-1.5 py-0.5 text-white/60">{d.layer}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-white/60">{d.shows}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+          <section>
+            <h3 className="text-sm font-semibold text-red-400">See it at a landing site</h3>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {MISSIONS.filter((m) => m.lat != null).map((m) => (
+                <button key={m.id} onClick={() => selectRelated(m)}
+                  className="rounded-full bg-white/5 px-3 py-1 text-xs text-white/80 hover:bg-white/10">{m.name}</button>
+              ))}
+            </div>
+          </section>
+        </>
+      )}
+    </div>
+  )
+
+  return (
+    <div className="relative h-full w-full overflow-hidden bg-bg text-white">
+      {/* Full-viewport globe container on both mobile and desktop */}
+      <main className="relative h-full w-full overflow-hidden bg-[#07090c]">
+        <MarsGlobe
+          locations={pins}
+          focus={focus}
+          onSelect={(d) => selectFromList(byId(d.id))}
+          onCenter={() => landed && setFocus({ id: sel.id, lat: sel.lat, lon: sel.lon })}
+          onReset={() => {
+            setFocus(null)
+            setHistory([])
+            setDetailsOpen(false)
+          }}
+          controlsClassName={`right-3 top-3 sm:right-4 sm:top-4 transition-all duration-300 ease-out ${
+            detailsOpen ? 'xl:right-[412px] xl:top-4' : 'xl:right-4 xl:top-4'
+          }`}
+        />
+        <div
+          className={`pointer-events-none absolute bottom-[74px] right-3 z-20 flex gap-3 rounded-lg border border-white/10 bg-black/60 px-3 py-1.5 text-[11px] text-white/70 backdrop-blur-md transition-all duration-300 ease-out xl:bottom-4 ${
+            detailsOpen ? 'xl:right-[412px]' : 'xl:right-4'
+          }`}
+        >
+          <span><i className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: TYPE_COLOR.rover }} />Rover</span>
+          <span><i className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: TYPE_COLOR.lander }} />Lander</span>
+          <span className="hidden text-white/40 sm:inline">Orbiters cover the whole planet</span>
+        </div>
+      </main>
+
+      {/* Desktop Persistent Left Sidebar: mission list (height = min(content, screen height)) */}
+      <aside className="hidden xl:absolute xl:bottom-auto xl:left-4 xl:top-4 xl:z-20 xl:flex xl:h-auto xl:max-h-[calc(100%-2rem)] xl:w-[320px] xl:flex-col overflow-hidden rounded-2xl border border-white/10 bg-black/65 p-4 backdrop-blur-md">
+        <h2 className="shrink-0 text-lg font-semibold">NASA Missions</h2>
+        <p className="mt-1 shrink-0 text-xs text-white/50">Surface and orbital missions, combined by location.</p>
+        <div className="mt-3 flex shrink-0 flex-wrap gap-2">
           {['all', 'rover', 'lander', 'orbiter'].map((f) => (
             <button key={f} onClick={() => setFilter(f)}
-              className={`rounded-full px-3 py-1 text-xs capitalize ${filter === f ? 'bg-red-500 text-white' : 'bg-white/5 text-white/70 hover:bg-white/10'}`}>
+              className={`rounded-full px-3 py-1 text-xs font-bold capitalize ${filter === f ? 'bg-red-500 text-white' : 'bg-white/5 text-white/70 hover:bg-white/10'}`}>
               {f}
             </button>
           ))}
         </div>
-        <div className="mt-3 max-h-[320px] flex-1 space-y-2 overflow-y-auto pr-1 xl:max-h-none">
-          {MISSIONS.filter((m) => filter === 'all' || m.type === filter).map((m) => (
-            <button key={m.id} onClick={() => select(m)}
-              className={`w-full rounded-xl border p-3 text-left transition ${selId === m.id ? 'border-red-500/60 bg-red-500/10' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}>
+        <div className="mt-3 min-h-0 space-y-2 overflow-y-auto pr-1">
+          {filteredMissions.map((m) => (
+            <button key={m.id} onClick={() => selectFromList(m)}
+              className={`w-full rounded-xl border p-3 text-left transition ${detailsOpen && selId === m.id ? 'border-red-500/60 bg-red-500/10' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}>
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium">{m.name}</span>
                 <Badge type={m.type} />
@@ -126,104 +323,115 @@ export default function MissionsPage() {
         </div>
       </aside>
 
-      {/* Center: globe */}
-      <main className="relative order-first h-[45vh] min-h-[300px] overflow-hidden rounded-2xl border border-white/10 bg-[#07090c] xl:order-none xl:h-auto xl:min-h-0">
-        <MarsGlobe
-          locations={pins}
-          focus={focus}
-          onSelect={(d) => select(byId(d.id))}
-          onCenter={() => landed && setFocus({ lat: sel.lat, lon: sel.lon })}
-          onReset={() => {
-            setFocus({ lat: 18.44, lon: 77.45 })
-            setSelId('perseverance')
+      {/* Desktop On-Demand Right Sidebar: appears only when a mission is selected, content-fit height, Back button only */}
+      <aside
+        className={`hidden xl:flex xl:flex-col xl:absolute xl:right-4 xl:top-4 xl:bottom-auto xl:z-20 xl:w-[380px] xl:h-auto xl:max-h-[calc(100%-2rem)] overflow-hidden rounded-2xl border border-white/10 bg-black/65 shadow-2xl backdrop-blur-md transition-all duration-300 ease-out ${
+          detailsOpen
+            ? 'xl:translate-x-0 xl:opacity-100'
+            : 'xl:pointer-events-none xl:translate-x-[calc(100%+2rem)] xl:opacity-0'
+        }`}
+      >
+        <div ref={desktopScrollRef} className="min-h-0 overflow-y-auto p-4">
+          <button
+            type="button"
+            onClick={handleBack}
+            className="mb-3.5 inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
+          >
+            <ArrowLeft size={14} /> Back
+          </button>
+          {renderMissionDetails()}
+        </div>
+      </aside>
+
+      {/* Mobile Expandable Bottom Sheet */}
+      <aside
+        className={`absolute inset-x-0 bottom-0 z-30 flex flex-col overflow-hidden rounded-t-3xl border-t border-white/15 bg-black/85 shadow-2xl backdrop-blur-xl transition-[height] duration-300 ease-out xl:hidden ${SHEET_HEIGHTS[sheetSnap]}`}
+      >
+        <div
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+          onClick={() => {
+            if (sheetSnap === 'peek') setSheetSnap('half')
           }}
-        />
-        <div className="pointer-events-none absolute bottom-3 right-3 z-20 flex gap-3 rounded-lg bg-black/60 backdrop-blur-md px-3 py-1.5 text-[11px] text-white/70 border border-white/10">
-          <span><i className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: TYPE_COLOR.rover }} />Rover</span>
-          <span><i className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: TYPE_COLOR.lander }} />Lander</span>
-          <span className="hidden text-white/40 sm:inline">Orbiters cover the whole planet</span>
-        </div>
-      </main>
-
-      {/* Right: detail + multi-mission data */}
-      <aside className="space-y-4 rounded-2xl border border-white/10 bg-[#0b0e13] p-4 xl:min-h-0 xl:overflow-y-auto">
-        <div>
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-xl font-semibold">{sel.name}</h2>
-            <Badge type={sel.type} />
-          </div>
-          <p className="mt-1 text-xs text-white/50">
-            {sel.site} · {sel.years}
-            {landed && ` · ${Math.abs(sel.lat).toFixed(2)}°${sel.lat >= 0 ? 'N' : 'S'}, ${(((sel.lon % 360) + 360) % 360).toFixed(2)}°E`}
-          </p>
-          <p className="mt-3 text-sm text-white/80">{sel.summary}</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {sel.instruments.map((i) => (
-              <span key={i} className="rounded-md bg-white/5 px-2 py-1 text-xs text-white/70">{i}</span>
-            ))}
+          className="flex shrink-0 cursor-pointer select-none flex-col items-center px-4 pb-2 pt-2"
+        >
+          <div className="mb-1.5 h-1.5 w-10 rounded-full bg-white/25" />
+          <div className="flex w-full items-center justify-between gap-2">
+            <span className="truncate text-sm font-bold text-white">
+              {detailsOpen ? sel.name : 'NASA Missions'}
+            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                toggleSheetSnap()
+              }}
+              aria-label={sheetSnap === 'peek' ? 'Expand bottom sheet' : 'Collapse bottom sheet'}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-gray-300 transition hover:bg-white/10 hover:text-white"
+            >
+              {sheetSnap === 'peek' ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+            </button>
           </div>
         </div>
 
-        {landed ? (
-          <>
-            <section>
-              <h3 className="text-sm font-semibold text-red-400">Data from other missions at this location</h3>
-              <p className="mt-1 text-xs text-white/50">Orbiters have mapped {sel.site} from above. Tap one to see its mission.</p>
-              <div className="mt-2 space-y-2">
-                {ORBITAL_DATA.map((d) => (
-                  <button key={d.mission + d.instrument} onClick={() => select(byId(d.mission))}
-                    className="w-full rounded-xl border border-white/10 bg-white/5 p-3 text-left hover:bg-white/10">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-medium text-white">{byId(d.mission).name} · {d.instrument}</span>
-                      <span className="rounded bg-white/10 px-1.5 py-0.5 text-white/60">{d.layer}</span>
-                    </div>
-                    <p className="mt-1 text-xs text-white/60">{d.shows}</p>
+        <div ref={scrollBodyRef} className="flex-1 overflow-y-auto px-4 pb-6 pt-2">
+          {detailsOpen ? (
+            <div>
+              <button
+                type="button"
+                onClick={handleBack}
+                className="mb-3.5 inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-200 transition hover:bg-white/10 hover:text-white"
+              >
+                <ArrowLeft size={14} /> Back
+              </button>
+              {renderMissionDetails()}
+            </div>
+          ) : (
+            <div>
+              <p className="mb-3 text-xs text-white/50">
+                Surface and orbital missions, combined by location.
+              </p>
+              <div className="mb-3 flex flex-wrap gap-2">
+                {['all', 'rover', 'lander', 'orbiter'].map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setFilter(f)}
+                    className={`rounded-full px-3 py-1 text-xs font-bold capitalize ${
+                      filter === f
+                        ? 'bg-red-500 text-white'
+                        : 'bg-white/5 text-white/70 hover:bg-white/10'
+                    }`}
+                  >
+                    {f}
                   </button>
                 ))}
               </div>
-            </section>
-            {nearby.length > 0 && (
-              <section>
-                <h3 className="text-sm font-semibold text-red-400">Nearby surface missions</h3>
-                <div className="mt-2 space-y-2">
-                  {nearby.map(({ m, km }) => (
-                    <button key={m.id} onClick={() => select(m)}
-                      className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/5 p-3 text-left text-sm hover:bg-white/10">
-                      <span>{m.name} <span className="text-xs text-white/50">· {m.site}</span></span>
-                      <span className="text-xs text-white/60">~{Math.round(km)} km</span>
-                    </button>
-                  ))}
-                </div>
-              </section>
-            )}
-          </>
-        ) : (
-          <>
-            <section>
-              <h3 className="text-sm font-semibold text-red-400">Datasets from this mission</h3>
-              <div className="mt-2 space-y-2">
-                {ORBITAL_DATA.filter((d) => d.mission === sel.id).map((d) => (
-                  <div key={d.instrument} className="rounded-xl border border-white/10 bg-white/5 p-3">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-medium">{d.instrument}</span>
-                      <span className="rounded bg-white/10 px-1.5 py-0.5 text-white/60">{d.layer}</span>
+              <div className="space-y-2">
+                {filteredMissions.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => selectFromList(m)}
+                    className={`w-full rounded-xl border p-3 text-left transition ${
+                      detailsOpen && selId === m.id
+                        ? 'border-red-500/60 bg-red-500/10'
+                        : 'border-white/10 bg-white/5 hover:bg-white/10'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium">{m.name}</span>
+                      <Badge type={m.type} />
                     </div>
-                    <p className="mt-1 text-xs text-white/60">{d.shows}</p>
-                  </div>
+                    <div className="mt-1 text-xs text-white/50">
+                      {m.site} · {m.years}
+                    </div>
+                  </button>
                 ))}
               </div>
-            </section>
-            <section>
-              <h3 className="text-sm font-semibold text-red-400">See it at a landing site</h3>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {MISSIONS.filter((m) => m.lat != null).map((m) => (
-                  <button key={m.id} onClick={() => select(m)}
-                    className="rounded-full bg-white/5 px-3 py-1 text-xs text-white/80 hover:bg-white/10">{m.name}</button>
-                ))}
-              </div>
-            </section>
-          </>
-        )}
+            </div>
+          )}
+        </div>
       </aside>
     </div>
   )
