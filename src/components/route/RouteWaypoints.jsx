@@ -1,5 +1,3 @@
-import SourceChip from './SourceChip';
-
 const Wrap = ({ embedded, children }) => (embedded ? <div className="rm-waypoints rm-waypoints--embedded">{children}</div> : <section className="rm-card rm-waypoints">{children}</section>);
 
 /** Numbered navigation waypoints for the planned route: the list a crew would read out. */
@@ -15,7 +13,7 @@ export default function RouteWaypoints({ route, embedded = false }) {
 
   return (
     <Wrap embedded={embedded}>
-      <h3>Waypoints <span className="rm-count">{route.waypoints.length}</span> {route.dataSource?.real && <SourceChip id="MOLA" />}</h3>
+      <h3>Waypoints <span className="rm-count">{route.waypoints.length}</span></h3>
       <ol>
         <li><span className="rm-wp__n rm-wp__n--start">S</span><div><strong>{dot(0)}{route.start.name}</strong><small>Start · {ns(route.start.lat)}, {route.start.lon.toFixed(2)}°E{legInfo(0)}</small></div></li>
         {route.waypoints.map((w, i) => (

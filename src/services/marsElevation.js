@@ -53,6 +53,18 @@ const fill = (tpl, ext, z, x, y) =>
 
 /** Browser tile loader: resolves { gray, alpha, colorful } or null when the tile is missing. */
 export function browserTileLoader(template) {
+  let scratchCanvas = null
+  let scratchCtx = null
+  const getCtx = () => {
+    if (!scratchCtx) {
+      scratchCanvas = document.createElement('canvas')
+      scratchCanvas.width = 256
+      scratchCanvas.height = 256
+      scratchCtx = scratchCanvas.getContext('2d', { willReadFrequently: true })
+    }
+    return scratchCtx
+  }
+
   const loadImg = (url) =>
     new Promise((resolve) => {
       const img = new Image()
@@ -65,9 +77,8 @@ export function browserTileLoader(template) {
     for (const ext of ['png', 'jpg']) {
       const img = await loadImg(fill(template, ext, z, x, y))
       if (!img) continue
-      const c = document.createElement('canvas')
-      c.width = 256; c.height = 256
-      const ctx = c.getContext('2d', { willReadFrequently: true })
+      const ctx = getCtx()
+      ctx.clearRect(0, 0, 256, 256)
       ctx.drawImage(img, 0, 0, 256, 256)
       const d = ctx.getImageData(0, 0, 256, 256).data
       const gray = new Uint8Array(65536), alpha = new Uint8Array(65536)
@@ -151,6 +162,7 @@ export function heightFromSnapshot(snap) {
 export function createMarsTerrain({ loadTile: rawLoadTile, anchors = ANCHORS, source = DEM_SOURCE } = {}) {
   // remember tiles (and in-flight requests) so planning several routes loads each tile only once
   const tileCache = new Map()
+  const preparedCache = new Map()
   const loadTile = (z, x, y) => {
     const k = `${z}/${x}/${y}`
     if (!tileCache.has(k)) {
@@ -205,26 +217,35 @@ export function createMarsTerrain({ loadTile: rawLoadTile, anchors = ANCHORS, so
         z--
         mosaic = new Mosaic(z, loadTile)
       }
+      const cacheKey = `${z}:${list.map((t) => mosaic.key(t.x, t.y)).join(',')}`
+      if (preparedCache.has(cacheKey)) {
+        return preparedCache.get(cacheKey)
+      }
       await mosaic.ensure(list)
       const missing = list.filter((t) => !mosaic.tiles.get(mosaic.key(t.x, t.y))).length
-      if (missing / list.length <= 0.2) break
+      if (missing / list.length <= 0.2) {
+        const res = {
+          heightAt: (lat, lon) => cal.a * mosaic.gray(lat, lon) + cal.b,
+          // plain data copy of what heightAt reads, so planning can run in a Web Worker (see terrainFromSnapshot)
+          snapshot: { z, a: cal.a, b: cal.b, tiles: [...mosaic.tiles].filter(([, t]) => t).map(([k, t]) => [k, { gray: t.gray, alpha: t.alpha }]) },
+          source: {
+            real: true,
+            name: source.name,
+            zoom: z,
+            calibration: { r2: +cal.r2.toFixed(3), rmseKm: +cal.rmse.toFixed(2) },
+          },
+        }
+        preparedCache.set(cacheKey, res)
+        if (preparedCache.size > 16) {
+          preparedCache.delete(preparedCache.keys().next().value)
+        }
+        return res
+      }
       if (z === 0) throw new Error(`${missing} of ${list.length} elevation tiles failed to load`)
       // this zoom level is probably not served: remember that and try the next one up
       console.info(`[RedMap] elevation zoom ${z} has no tiles (${missing} of ${list.length} missing), trying zoom ${z - 1}`)
       zoomCap = z - 1
       z--
-    }
-
-    return {
-      heightAt: (lat, lon) => cal.a * mosaic.gray(lat, lon) + cal.b,
-      // plain data copy of what heightAt reads, so planning can run in a Web Worker (see terrainFromSnapshot)
-      snapshot: { z, a: cal.a, b: cal.b, tiles: [...mosaic.tiles].filter(([, t]) => t).map(([k, t]) => [k, { gray: t.gray, alpha: t.alpha }]) },
-      source: {
-        real: true,
-        name: source.name,
-        zoom: z,
-        calibration: { r2: +cal.r2.toFixed(3), rmseKm: +cal.rmse.toFixed(2) },
-      },
     }
   }
 
@@ -232,3 +253,4 @@ export function createMarsTerrain({ loadTile: rawLoadTile, anchors = ANCHORS, so
 }
 
 export const marsTerrain = createMarsTerrain({ loadTile: browserTileLoader(DEM_SOURCE.url) })
+

@@ -1,12 +1,257 @@
 [
-  { "id": "jezero", "name": "Jezero Crater", "type": "Crater", "tag": "Scientific Interest", "lat": 18.435, "lon": 77.527, "elevation": -2.6, "color": "#e5322d" },
-  { "id": "olympus", "name": "Olympus Mons", "type": "Volcano", "tag": "Geological Feature", "lat": 18.65, "lon": 226.2, "elevation": 21.9, "color": "#3b82f6" },
-  { "id": "valles", "name": "Valles Marineris", "type": "Canyon", "tag": "Geological Feature", "lat": -13.9, "lon": 301.0, "elevation": -4.0, "color": "#22c55e" },
-  { "id": "tyrrhena", "name": "Tyrrhena Terra", "type": "Terrain", "tag": "Ancient Highlands", "lat": -15.0, "lon": 90.0, "elevation": 1.2, "color": "#f59e0b" },
-  { "id": "nili", "name": "Nili Fossae", "type": "Trough", "tag": "Clay & Carbonates", "lat": 21.0, "lon": 74.5, "elevation": -0.6, "color": "#a855f7" },
-  { "id": "isidis", "name": "Isidis Planitia", "type": "Plain", "tag": "Impact Basin", "lat": 12.9, "lon": 87.0, "elevation": -3.8, "color": "#06b6d4" },
-  { "id": "butler", "name": "Octavia E. Butler Landing", "type": "Landing Site", "tag": "Perseverance Landing", "lat": 18.4446, "lon": 77.4509, "elevation": -2.6, "color": "#f43f5e" },
-  { "id": "delta", "name": "Jezero Delta Front", "type": "Delta", "tag": "Ancient River Delta", "lat": 18.47, "lon": 77.35, "elevation": -2.5, "color": "#14b8a6" },
-  { "id": "neretva", "name": "Neretva Vallis Inlet", "type": "Valley", "tag": "Ancient River Channel", "lat": 18.6, "lon": 77.1, "elevation": -2.2, "color": "#eab308" },
-  { "id": "syrtis", "name": "Syrtis Major", "type": "Volcanic Plain", "tag": "Dark Volcanic Region", "lat": 8.4, "lon": 69.5, "elevation": 0.3, "color": "#8b5cf6" }
+  {
+    "id": "gediz",
+    "name": "Gediz Vallis Ridge",
+    "type": "Channel & Ridge",
+    "tag": "Elemental Sulfur & Debris",
+    "lat": -4.88,
+    "lon": 137.42,
+    "elevation": -3.95,
+    "color": "#f59e0b",
+    "description": "Steep debris channel on the flank of Mount Sharp where Curiosity discovered pure elemental sulfur stones in 2024 before ascending toward the boxwork unit.",
+    "tags": ["Gale Crater", "Elemental Sulfur", "Debris Channel"],
+    "mission": {
+      "name": "Curiosity Rover (MSL)",
+      "years": "2012 – Present",
+      "note": "Crushed a rock in Gediz Vallis channel revealing pure yellow sulfur crystals never before seen on Mars."
+    }
+  },
+  {
+    "id": "boxwork",
+    "name": "Mount Sharp Boxwork Formations",
+    "type": "Boxwork Network",
+    "tag": "2025 Curiosity Target",
+    "lat": -5.02,
+    "lon": 137.56,
+    "elevation": -3.65,
+    "color": "#e5322d",
+    "description": "Extensive web-like polygonal mineral ridges on Mount Sharp formed when ancient mineral-rich groundwater percolated through bedrock fractures and cemented them against wind erosion.",
+    "tags": ["Boxwork Ridges", "Groundwater Veins", "Astrobiology Target"],
+    "mission": {
+      "name": "Curiosity Rover (MSL)",
+      "years": "2025 Science Campaign",
+      "note": "Investigated the cemented polygonal fracture ridges on Mount Sharp to test whether subsurface fluids sustained habitable niches as Mars dried out."
+    }
+  },
+  {
+    "id": "bradbury",
+    "name": "Bradbury Landing (Gale)",
+    "type": "Landing Site",
+    "tag": "Curiosity Touchdown",
+    "lat": -4.5895,
+    "lon": 137.4417,
+    "elevation": -4.5,
+    "color": "#38bdf8",
+    "description": "Touchdown site of NASA's Curiosity rover on Aeolis Palus inside northern Gale Crater, serving as the primary base camp for Mount Sharp surface traverses.",
+    "tags": ["Landing Site", "Alluvial Fan", "Base Camp"],
+    "mission": {
+      "name": "Curiosity Rover (MSL)",
+      "years": "2012 – Present",
+      "note": "Measured baseline surface radiation (0.64 mSv/sol) with RAD and discovered ancient stream cobbles."
+    }
+  },
+  {
+    "id": "yellowknife",
+    "name": "Yellowknife Bay",
+    "type": "Ancient Lakebed",
+    "tag": "Habitable Mudstone",
+    "lat": -4.62,
+    "lon": 137.49,
+    "elevation": -4.52,
+    "color": "#06b6d4",
+    "description": "Fine-grained Sheepbed mudstone embayment where Curiosity drilled its first sample and proved Gale Crater once held a calm, fresh-water lake suitable for chemolithoautotrophic microbes.",
+    "tags": ["Mudstone", "Clay Minerals", "Drilling Site"],
+    "mission": {
+      "name": "Curiosity Rover (MSL)",
+      "years": "2013 Campaign",
+      "note": "CheMin and SAM identified smectite clays, sulfur, nitrogen, hydrogen, oxygen, phosphorus, and carbon."
+    }
+  },
+  {
+    "id": "sulfate",
+    "name": "Mount Sharp Sulfate Unit",
+    "type": "Layered Butte",
+    "tag": "Climate Transition",
+    "lat": -5.08,
+    "lon": 137.68,
+    "elevation": -3.35,
+    "color": "#a855f7",
+    "description": "Upper sulfate-bearing strata of Mount Sharp recording the planetary transition from ancient wet clay-forming lakes to a colder, more arid Martian climate.",
+    "tags": ["Sulfate Strata", "Marker Band", "Layered Buttes"],
+    "mission": {
+      "name": "MRO CRISM & Curiosity",
+      "years": "2006 – Present",
+      "note": "Orbital CRISM spectra and surface CheMin mineralogy confirm magnesium and calcium sulfate salts."
+    }
+  },
+  {
+    "id": "butler",
+    "name": "Octavia E. Butler Landing",
+    "type": "Landing Site",
+    "tag": "Perseverance Landing",
+    "lat": 18.4446,
+    "lon": 77.4509,
+    "elevation": -2.6,
+    "color": "#f43f5e",
+    "description": "Touchdown site of the Perseverance rover and Ingenuity helicopter on the crater floor of Jezero, adjacent to the fractured Máaz and Séítah igneous units.",
+    "tags": ["Landing Site", "Sample Depot", "Jezero Floor"],
+    "mission": {
+      "name": "Perseverance Rover",
+      "years": "2021 – Present",
+      "note": "Cached titanium sample tubes at Three Forks depot and demonstrated MOXIE oxygen production."
+    }
+  },
+  {
+    "id": "delta",
+    "name": "Jezero Delta Front",
+    "type": "Delta",
+    "tag": "Ancient River Delta",
+    "lat": 18.47,
+    "lon": 77.35,
+    "elevation": -2.5,
+    "color": "#14b8a6",
+    "description": "Steeply layered sedimentary fan deposited where an ancient river emptied into Lake Jezero over 3.5 billion years ago—one of the highest-priority astrobiology sites on Mars.",
+    "tags": ["River Delta", "Biosignatures", "Sedimentary Fan"],
+    "mission": {
+      "name": "Perseverance Rover",
+      "years": "2022 – 2024",
+      "note": "Collected mudstone and carbonate cores containing organic molecules and 'leopard spot' redox textures."
+    }
+  },
+  {
+    "id": "neretva",
+    "name": "Neretva Vallis Inlet",
+    "type": "Valley",
+    "tag": "Ancient River Channel",
+    "lat": 18.6,
+    "lon": 77.1,
+    "elevation": -2.2,
+    "color": "#eab308",
+    "description": "The western inflow channel that breached the Jezero Crater rim and supplied water and mineral sediment to the ancient crater lake.",
+    "tags": ["Inflow Channel", "Marginal Carbonates", "Bright Angel"],
+    "mission": {
+      "name": "Perseverance Rover",
+      "years": "2024 – Present",
+      "note": "Sampled the 'Cheyava Falls' rock in Neretva Vallis before climbing the western crater rim."
+    }
+  },
+  {
+    "id": "jezero",
+    "name": "Jezero Crater",
+    "type": "Crater",
+    "tag": "Scientific Interest",
+    "lat": 18.435,
+    "lon": 77.527,
+    "elevation": -2.6,
+    "color": "#e5322d",
+    "description": "A 45 km diameter impact basin on the western edge of Isidis Planitia that once held a standing lake with both inlet and outlet river valleys.",
+    "tags": ["Paleolake", "Carbonate Rim", "Sample Return"],
+    "mission": {
+      "name": "Mars 2020 Perseverance",
+      "years": "2021 – Present",
+      "note": "Primary target for the NASA-ESA Mars Sample Return campaign."
+    }
+  },
+  {
+    "id": "nili",
+    "name": "Nili Fossae",
+    "type": "Trough",
+    "tag": "Clay & Carbonates",
+    "lat": 21.0,
+    "lon": 74.5,
+    "elevation": -0.6,
+    "color": "#a855f7",
+    "description": "Concentric graben troughs northwest of Jezero exposing some of the largest phyllosilicate clay, olivine, and carbonate deposits on Mars.",
+    "tags": ["Graben Troughs", "Carbonates", "Olivine"],
+    "mission": {
+      "name": "Mars Reconnaissance Orbiter",
+      "years": "2006 – Present",
+      "note": "CRISM hyperspectral mapping identified abundant iron-magnesium clays and carbonate outcrops."
+    }
+  },
+  {
+    "id": "isidis",
+    "name": "Isidis Planitia",
+    "type": "Plain",
+    "tag": "Impact Basin",
+    "lat": 12.9,
+    "lon": 87.0,
+    "elevation": -3.8,
+    "color": "#06b6d4",
+    "description": "Giant smooth impact basin east of Jezero Crater offering flat lowland terrain and high atmospheric pressure for landing systems.",
+    "tags": ["Impact Basin", "Smooth Plains", "Lowlands"],
+    "mission": {
+      "name": "MGS MOLA & MRO",
+      "years": "1997 – Present",
+      "note": "Mapped by MOLA laser altimetry and SHARAD subsurface radar."
+    }
+  },
+  {
+    "id": "syrtis",
+    "name": "Syrtis Major",
+    "type": "Volcanic Plain",
+    "tag": "Dark Volcanic Region",
+    "lat": 8.4,
+    "lon": 69.5,
+    "elevation": 0.3,
+    "color": "#8b5cf6",
+    "description": "Low-relief Hesperian shield volcano southwest of Jezero covered in dark basaltic sand sheets and silica-rich volcanic cones.",
+    "tags": ["Shield Volcano", "Basalt", "Hydrothermal Silica"],
+    "mission": {
+      "name": "Mars Global Surveyor & Odyssey",
+      "years": "1997 – Present",
+      "note": "TES and THEMIS mapped dust-free basaltic bedrock and dacite domes."
+    }
+  },
+  {
+    "id": "tyrrhena",
+    "name": "Tyrrhena Terra",
+    "type": "Terrain",
+    "tag": "Ancient Highlands",
+    "lat": -15.0,
+    "lon": 90.0,
+    "elevation": 1.2,
+    "color": "#f59e0b",
+    "description": "Heavily cratered Noachian highlands south of Isidis featuring ancient valley networks and impact megabreccia.",
+    "tags": ["Noachian Highlands", "Valley Networks", "Cratered Terrain"],
+    "mission": {
+      "name": "Mars Express & MRO",
+      "years": "2004 – Present",
+      "note": "HRSC and CTX imaged dendritic drainage channels carved by early Martian precipitation."
+    }
+  },
+  {
+    "id": "olympus",
+    "name": "Olympus Mons",
+    "type": "Volcano",
+    "tag": "Geological Feature",
+    "lat": 18.65,
+    "lon": 226.2,
+    "elevation": 21.9,
+    "color": "#3b82f6",
+    "description": "The tallest planetary shield volcano in the solar system, rising nearly 22 km above the Martian datum with a 6 km basal cliff escarpment.",
+    "tags": ["Shield Volcano", "Caldera", "Basal Scarp"],
+    "mission": {
+      "name": "Mars Global Surveyor (MOLA)",
+      "years": "1997 – 2006",
+      "note": "Laser altimetry profiled the 80 km summit caldera complex and aureole landslide lobes."
+    }
+  },
+  {
+    "id": "valles",
+    "name": "Valles Marineris",
+    "type": "Canyon",
+    "tag": "Geological Feature",
+    "lat": -13.9,
+    "lon": 301.0,
+    "elevation": -4.0,
+    "color": "#22c55e",
+    "description": "A 4,000 km tectonic canyon system reaching 7 km deep, exposing kilometers of layered volcanic and sedimentary crust.",
+    "tags": ["Tectonic Canyon", "Layered Mensae", "Sulfate Deposits"],
+    "mission": {
+      "name": "Mars Reconnaissance Orbiter",
+      "years": "2006 – Present",
+      "note": "HiRISE and CRISM revealed recurring slope lineae and thick interior layered sulfate mounds."
+    }
+  }
 ]

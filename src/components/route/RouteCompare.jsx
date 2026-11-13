@@ -54,8 +54,6 @@ export default function RouteCompare({ routes, current, onSelect }) {
           {modes.filter((m) => routes[m]?.error).map((m) => `${MODES[m].label}: ${routes[m].error}`).join(' ')}
         </p>
       )}
-      {modes.some((m) => !routes[m]) && <p className="rm-muted">Planning the other modes…</p>}
-      <p className="rm-muted">The map shows the selected route. Click a column to switch.</p>
     </section>
   );
 }

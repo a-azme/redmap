@@ -38,14 +38,62 @@ import { MODES, MARS_RADIUS_KM, haversineKm, finalizeRoute, estimateTempC } from
 
 export const LOCATIONS = locationData.map((l) => ({ ...l, elevKm: l.elevation }))
 
+export const SECTOR_LOCATION_IDS = {
+  gale: ['gediz', 'boxwork', 'bradbury', 'yellowknife', 'sulfate'],
+  jezero: ['butler', 'delta', 'neretva', 'jezero'],
+}
+
+export function getLocationsForSector(sectorKey = 'gale') {
+  const ids = SECTOR_LOCATION_IDS[sectorKey] || SECTOR_LOCATION_IDS.gale
+  const allowed = new Set(ids)
+  return LOCATIONS.filter((l) => allowed.has(l.id))
+}
+
+export function detectSectorForLocationId(locId) {
+  if (SECTOR_LOCATION_IDS.jezero.includes(locId)) return 'jezero'
+  return 'gale'
+}
+
 export { MODES, MARS_RADIUS_KM, haversineKm } from '../../lib/routeAnalysis.js'
 
+export const MARSWALK_PRESETS = [
+  {
+    id: 'boxwork-eva',
+    label: 'Boxwork EVA',
+    subtitle: 'Gediz Vallis → Mt. Sharp Boxwork (2025)',
+    startId: 'gediz',
+    destId: 'boxwork',
+    mode: 'scientific',
+    payloadKg: 14,
+  },
+  {
+    id: 'jezero-delta',
+    label: 'Jezero Delta',
+    subtitle: 'Butler Landing → Neretva Vallis',
+    startId: 'butler',
+    destId: 'neretva',
+    mode: 'scientific',
+    payloadKg: 12,
+  },
+  {
+    id: 'gale-lakebed',
+    label: 'Gale Climb',
+    subtitle: 'Bradbury Landing → Gediz Vallis',
+    startId: 'bradbury',
+    destId: 'gediz',
+    mode: 'safest',
+    payloadKg: 10,
+  },
+]
+
 export const DEFAULT_SETTINGS = {
-  mode: 'fastest',
+  mode: 'scientific',
   maxSlopeDeg: 15,
   avoidRough: true,
   showScience: true,
   evaHoursPerSol: 6,
+  payloadKg: 12,
+  crewSize: 2,
 };
 
 const rad = (d) => (d * Math.PI) / 180;
@@ -96,8 +144,9 @@ export function planRoute(start, end, settings = DEFAULT_SETTINGS) {
   const rough = mode.roughness;
   const rng = mulberry32(hash(start.id + end.id + settings.mode + settings.avoidRough));
 
-  const distanceKm = Math.round(haversineKm(start, end) * mode.detour);
-  const N = Math.min(80, Math.max(30, Math.round(distanceKm / 10)));
+  const rawDist = haversineKm(start, end) * mode.detour;
+  const distanceKm = rawDist < 35 ? Math.max(0.5, +rawDist.toFixed(1)) : Math.round(rawDist);
+  const N = Math.min(80, Math.max(30, Math.round(distanceKm / Math.max(0.25, distanceKm / 45))));
   const phase = rng() * Math.PI * 2;
 
   // PLACEHOLDER terrain generator: replace this loop with real MOLA/HRSC elevation sampling
@@ -120,7 +169,7 @@ export function planRoute(start, end, settings = DEFAULT_SETTINGS) {
     const elevKm = base + wave;
     const tempC = estimateTempC(pos.lat, elevKm);
 
-    points.push({ km: f * distanceKm, ...pos, elevKm: +elevKm.toFixed(3), terrain, slopeDeg: +slope.toFixed(1), tempC });
+    points.push({ km: +(f * distanceKm).toFixed(1), ...pos, elevKm: +elevKm.toFixed(3), terrain, slopeDeg: +slope.toFixed(1), tempC });
   }
 
   // ---- science stops (illustrative only: this planner is the offline fallback) ----
@@ -130,11 +179,23 @@ export function planRoute(start, end, settings = DEFAULT_SETTINGS) {
     ? Array.from({ length: stopCount }, (_, i) => {
         const f = (i + 1) / (stopCount + 1) + (rng() - 0.5) * 0.04;
         const p = points[Math.min(points.length - 1, Math.round(f * N))];
-        return { id: `s${i}`, ...pool[i % pool.length], km: Math.round(p.km), lat: p.lat, lon: p.lon, elevKm: p.elevKm };
+        return { id: `s${i}`, category: 'Geology', ...pool[i % pool.length], km: distanceKm < 35 ? +p.km.toFixed(1) : Math.round(p.km), lat: p.lat, lon: p.lon, elevKm: p.elevKm };
       })
     : [];
 
-  return finalizeRoute({ start, end, settings, points, distanceKm, stops, dataSource: { real: false } });
+  const midPt = points[Math.floor(points.length * 0.55)] || points[0];
+  const shelterPoint = {
+    km: midPt.km,
+    lat: midPt.lat,
+    lon: midPt.lon,
+    elevKm: midPt.elevKm,
+    slopeDeg: midPt.slopeDeg,
+    terrain: midPt.terrain,
+    shieldingPct: 28,
+    feature: 'Steep ridge scarp overhang',
+  };
+
+  return finalizeRoute({ start, end, settings, points, distanceKm, stops, shelterPoint, dataSource: { real: false } });
 }
 
 // Each science stop adds ~0.5 sol of work

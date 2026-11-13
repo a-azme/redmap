@@ -13,7 +13,18 @@ export function evaPlanText(route, plan) {
   L.push(`Max slope:  ${route.maxSlopeDeg.toFixed(0)} deg   Elevation gain: +${route.elevationGainKm} km`)
   L.push(`Date:       ${plan.startDate.toISOString().slice(0, 10)}   Ls ${plan.ls} deg (${plan.season})`)
   L.push(`Comms:      one-way ${plan.comms.oneWayMin} min, round trip ${plan.comms.roundTripMin} min (${plan.comms.distanceAU} AU)`)
-  L.push(`Radiation:  ~${plan.radiationMsv} mSv (0.64 mSv/sol baseline)`)
+  L.push(`Radiation:  ~${plan.radiationMsv} mSv (${plan.doseMsvPerSol ?? 0.64} mSv/sol; ${plan.shieldedRadiationMsv ?? plan.radiationMsv} mSv with terrain shelter)`)
+  if (plan.suitTelemetry) {
+    const st = plan.suitTelemetry
+    L.push(`Suit PLSS:  Payload ${plan.payloadKg ?? 0} kg | Peak Sol O2 ${st.peakO2Kg} kg (${st.peakO2Pct}%), H2O ${st.peakWaterL} L (${st.peakWaterPct}%), Battery ${st.peakBatteryPct}%`)
+  }
+  if (plan.travel === 'rover' && plan.roverTelemetry) {
+    const rv = plan.roverTelemetry
+    L.push(`Rover Dyn:  ${rv.rover.massKg} kg @ 3.71 m/s2 (Crr=${rv.rover.crr}) | Drive ${rv.totalKwh}/${rv.usableKwh} kWh usable | Peak ${rv.peakKw} kW @ km ${rv.peakAtKm}`)
+  }
+  if (route.shelterPoint) {
+    L.push(`Shelter:    km ${route.shelterPoint.km} (${route.shelterPoint.feature}, -${route.shelterPoint.shieldingPct}% solar proton sky exposure)`)
+  }
   L.push(`Terrain:    ${route.dataSource?.real ? route.dataSource.name : 'SIMULATED (NASA elevation unavailable)'}`)
   L.push('')
   L.push(`${pad('Sol', 5)}${pad('Km', 14)}${pad('EVA window (LTST)', 20)}${pad('Hours', 7)}Notes`)

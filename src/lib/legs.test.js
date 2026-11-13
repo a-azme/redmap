@@ -5,7 +5,6 @@ import { haversineKm } from './routeAnalysis.js'
 
 const NILI = { id: 'nili', name: 'Nili Fossae', lat: 21.0, lon: 74.5 }
 const JEZERO = { id: 'jezero', name: 'Jezero Crater', lat: 18.435, lon: 77.527 }
-const VALLES = { id: 'valles', name: 'Valles Marineris', lat: -13.9, lon: 301.0 }
 const mid = { lat: (NILI.lat + JEZERO.lat) / 2, lon: (NILI.lon + JEZERO.lon) / 2 }
 const KM = (Math.PI / 180) * 3389.5
 const COS = Math.cos((mid.lat * Math.PI) / 180)
@@ -151,7 +150,7 @@ test('the exported plan lists each waypoint with its leg and retrace flag', asyn
 })
 
 // ---- side slopes and smoothing ----
-import { smoothPath, shortcutPath } from './realRoute.js'
+import { smoothPath } from './realRoute.js'
 import { crossSlopeDeg, findPath } from './pathfinding.js'
 
 test('side slope is 0 going straight up a slope and large going across it', () => {

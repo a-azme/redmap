@@ -40,6 +40,26 @@ export const HAZARD_LEGENDS = {
 const KEEP_COLORS = { 1: [245, 165, 36, 0.25], 2: [235, 50, 40, 0.65], 3: [180, 70, 230, 0.65], 4: [255, 140, 20, 0.65] }
 export const keepColor = (code) => KEEP_COLORS[code] ?? [0, 0, 0, 0]
 
+// Precompute 256-entry RGBA lookup tables (Uint8ClampedArray of length 1024) for each hazard kind
+// so renderHazardCanvas performs zero heap allocations per pixel.
+const SCALES = { slope: 4, low: 100, bump: 16 }
+const LUTS = {}
+for (const kind of ['slope', 'low', 'bump', 'keep']) {
+  const lut = new Uint8ClampedArray(256 * 4)
+  const scale = SCALES[kind]
+  for (let v = 0; v < 256; v++) {
+    const [r, g, b, a] = kind === 'keep' ? keepColor(v) : hazardColor(kind, v / scale)
+    const idx = v * 4
+    lut[idx] = r
+    lut[idx + 1] = g
+    lut[idx + 2] = b
+    lut[idx + 3] = Math.round(clamp(a, 0, 1) * 255)
+  }
+  LUTS[kind] = lut
+}
+
+const DATA_URL_CACHE = new WeakMap()
+
 /** Degrees west/south/east/north for the grid, or null if it crosses the +-180 line (drawn only when it does not). */
 export function hazardRectangle(h) {
   const wrap = (l) => ((((l + 180) % 360) + 360) % 360) - 180
@@ -55,13 +75,34 @@ export function renderHazardCanvas(h, kind) {
   c.width = h.gw; c.height = h.gh
   const ctx = c.getContext('2d')
   const img = ctx.createImageData(h.gw, h.gh)
+  const dst = img.data
   const src = { slope: h.slope, low: h.low, bump: h.bump, keep: h.keep }[kind]
-  const scale = { slope: 4, low: 100, bump: 16 }[kind]
-  for (let i = 0; i < src.length; i++) {
-    const [r, g, b, a] = kind === 'keep' ? keepColor(src[i]) : hazardColor(kind, src[i] / scale)
-    img.data[i * 4] = r; img.data[i * 4 + 1] = g; img.data[i * 4 + 2] = b
-    img.data[i * 4 + 3] = Math.round(clamp(a, 0, 1) * 255)
+  const lut = LUTS[kind]
+  if (src && lut) {
+    for (let i = 0, n = src.length; i < n; i++) {
+      const sIdx = src[i] * 4
+      const dIdx = i * 4
+      dst[dIdx] = lut[sIdx]
+      dst[dIdx + 1] = lut[sIdx + 1]
+      dst[dIdx + 2] = lut[sIdx + 2]
+      dst[dIdx + 3] = lut[sIdx + 3]
+    }
   }
   ctx.putImageData(img, 0, 0)
   return c
 }
+
+/** Returns a cached data URL for a hazard grid and kind so switching back and forth is instant. */
+export function getHazardDataUrl(h, kind) {
+  if (!h || !kind || kind === 'off') return null
+  let byKind = DATA_URL_CACHE.get(h)
+  if (!byKind) {
+    byKind = {}
+    DATA_URL_CACHE.set(h, byKind)
+  }
+  if (!byKind[kind]) {
+    byKind[kind] = renderHazardCanvas(h, kind).toDataURL()
+  }
+  return byKind[kind]
+}
+

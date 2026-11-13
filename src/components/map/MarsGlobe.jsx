@@ -12,14 +12,29 @@ import {
 
 window.CESIUM_BASE_URL = '/cesium/'
 
-const MIN_ZOOM_METERS = 50_000 // 50 km
+const MIN_ZOOM_METERS = 500 // 500 m (0.5 km) hyperlocal zoom over HiRISE 25 cm mosaics
 const MAX_ZOOM_METERS = 330_000_000 // 330,000 km
-const ORBIT_HEIGHT = 8_000_000 // 8,000 km initial height
+const ORBIT_HEIGHT = 8_000_000 // 8,000 km initial height (mobile baseline)
 const ABBREV_START_KM = 7000
 const HIDE_ALL_ALT_KM = 24000
 
+// On desktop landscape viewports (width > height), Cesium applies the 60° FOV horizontally,
+// which narrows the vertical FOV and makes 8,000 km appear zoomed in. Scale desktop orbit height
+// with aspect ratio so the full Mars globe and atmosphere halo sit comfortably framed on desktop.
+function getOrbitHeight(viewer) {
+  const w =
+    viewer?.canvas?.clientWidth ||
+    (typeof window !== 'undefined' ? window.innerWidth : 1024)
+  const h =
+    viewer?.canvas?.clientHeight ||
+    (typeof window !== 'undefined' ? Math.max(1, window.innerHeight - 56) : 768)
+  if (w < 1024 || w <= h) return ORBIT_HEIGHT
+  const aspect = Math.min(2.4, Math.max(1.25, w / Math.max(1, h)))
+  return Math.round(Math.max(11_500_000, ORBIT_HEIGHT * (aspect / 1.25)))
+}
+
 function getCameraZoomHeight(viewer) {
-  if (!viewer || viewer.isDestroyed()) return ORBIT_HEIGHT
+  if (!viewer || viewer.isDestroyed()) return getOrbitHeight(viewer)
   if (viewer.scene.mode === Cesium.SceneMode.SCENE2D) {
     const f = viewer.camera.frustum
     if (f && typeof f.top === 'number' && typeof f.bottom === 'number') {
@@ -27,7 +42,7 @@ function getCameraZoomHeight(viewer) {
     }
     return viewer.camera.getMagnitude()
   }
-  return viewer.camera.positionCartographic?.height ?? ORBIT_HEIGHT
+  return viewer.camera.positionCartographic?.height ?? getOrbitHeight(viewer)
 }
 
 // Computes a 2D Rectangle whose aspect ratio is narrower than or equal to the canvas aspect ratio
@@ -150,7 +165,7 @@ function getSharedGlobe() {
   ctrl.minimumZoomDistance = MIN_ZOOM_METERS
   ctrl.maximumZoomDistance = MAX_ZOOM_METERS
 
-  viewer.camera.setView({ destination: at(77, 18, ORBIT_HEIGHT) })
+  viewer.camera.setView({ destination: at(77, 18, getOrbitHeight(viewer)) })
 
   let spinRaf = 0
   let lastSpinTime = 0
@@ -158,6 +173,7 @@ function getSharedGlobe() {
   const state = {
     container,
     viewer,
+    initialSized: false,
     globeDrawn: false,
     appliedKey: null,
     disposeLayer: null,
@@ -297,6 +313,12 @@ function getSharedGlobe() {
         state.stopSpin()
         state.onSelect?.(loc)
       }
+    } else if (typeof id === 'string' && id.startsWith('rover-')) {
+      const rover = ROVERS.find((r) => 'rover-' + r.id === id)
+      if (rover) {
+        state.stopSpin()
+        state.onSelect?.({ ...rover, isRoverPin: true })
+      }
     }
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
 
@@ -313,7 +335,7 @@ function getSharedGlobe() {
         lastPickTime = now
         const picked = scene.pick(latestEndPos)
         const id = picked && picked.id && picked.id.id
-        lastIsPin = typeof id === 'string' && id.startsWith('loc-')
+        lastIsPin = typeof id === 'string' && (id.startsWith('loc-') || id.startsWith('rover-'))
       }
 
       const cartesian = viewer.camera.pickEllipsoid(latestEndPos, MARS)
@@ -365,6 +387,7 @@ export default function MarsGlobe({
   legendClassName,
   showCompass = false,
   compassClassName,
+  showRovers = false,
 }) {
   const elRef = useRef(null)
   const viewerRef = useRef(null)
@@ -436,14 +459,29 @@ export default function MarsGlobe({
 
     host.appendChild(shared.container)
     viewerRef.current = shared.viewer
+    if (!shared.viewer.isDestroyed()) {
+      shared.viewer.useDefaultRenderLoop = true
+    }
     if (host.clientWidth > 0 && host.clientHeight > 0) {
       shared.viewer.resize()
+      if (!shared.initialSized) {
+        shared.initialSized = true
+        shared.viewer.camera.setView({
+          destination: at(77, 18, getOrbitHeight(shared.viewer)),
+        })
+      }
       shared.viewer.scene.requestRender()
     }
 
     const ro = new ResizeObserver(() => {
       if (!shared.viewer.isDestroyed() && host.clientWidth > 0 && host.clientHeight > 0) {
         shared.viewer.resize()
+        if (!shared.initialSized) {
+          shared.initialSized = true
+          shared.viewer.camera.setView({
+            destination: at(77, 18, getOrbitHeight(shared.viewer)),
+          })
+        }
         shared.viewer.scene.requestRender()
       }
     })
@@ -451,6 +489,10 @@ export default function MarsGlobe({
 
     return () => {
       ro.disconnect()
+      shared.stopSpin?.()
+      if (!shared.viewer.isDestroyed()) {
+        shared.viewer.useDefaultRenderLoop = false
+      }
       if (shared.container.parentNode === host) {
         host.removeChild(shared.container)
       }
@@ -496,11 +538,12 @@ export default function MarsGlobe({
       ctrl.maximumZoomDistance = MAX_ZOOM_METERS
       const lon = focus?.lon ?? 77
       const lat = focus?.lat ?? 18
+      const orbitH = getOrbitHeight(viewer)
       viewer.camera.setView({
-        destination: at(lon, lat, ORBIT_HEIGHT * 1.25),
+        destination: at(lon, lat, orbitH * 1.25),
       })
       viewer.camera.flyTo({
-        destination: at(lon, lat, ORBIT_HEIGHT),
+        destination: at(lon, lat, orbitH),
         duration: 0.65,
         complete: () => sharedGlobe?.startSpin(),
       })
@@ -579,7 +622,7 @@ export default function MarsGlobe({
     }
   }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const showRovers = key === 'missions'
+  const activeRovers = Boolean(showRovers || key === 'missions')
 
   // Location, region, and rover markers with per-item [min_alt_km, max_alt_km] zoom visibility & overlap avoidance
   useEffect(() => {
@@ -601,13 +644,13 @@ export default function MarsGlobe({
         typeof item.min_alt_km === 'number' && typeof item.max_alt_km === 'number'
       const isLevel1Region = item.level === 1
       const level = item.level || 2
-      // Allow Level 3 surface features to stay visible down to the 50 km minimum zoom limit
+      // Allow Level 3 surface features to stay visible down to the 0.5 km (500 m) minimum zoom limit
       const minAltKm = hasAltBounds
         ? level === 3 && item.min_alt_km <= 100
-          ? 50
+          ? 0.5
           : item.min_alt_km
-        : 50
-      const maxAltKm = hasAltBounds ? item.max_alt_km : 8000
+        : 0.5
+      const maxAltKm = hasAltBounds ? item.max_alt_km : 18000
 
       const isMissionHub = item.category === 'NASA_MISSION_HUB'
       const isNasa = Boolean(item.is_nasa)
@@ -671,17 +714,17 @@ export default function MarsGlobe({
     }
 
     locations.forEach((l) => add(l))
-    if (showRovers) {
+    if (activeRovers) {
       ROVERS.forEach((r) =>
         add(
           {
             ...r,
             entityId: 'rover-' + r.id,
-            color: '#38bdf8',
+            color: r.color || '#38bdf8',
             category: 'NASA_MISSION_HUB',
             is_nasa: true,
-            min_alt_km: 50,
-            max_alt_km: 8000,
+            min_alt_km: 0.5,
+            max_alt_km: 18000,
           },
           18
         )
@@ -886,7 +929,7 @@ export default function MarsGlobe({
     return () => {
       if (!viewer.isDestroyed()) viewer.scene.preRender.removeEventListener(onPreRender)
     }
-  }, [locations, showRovers])
+  }, [locations, activeRovers])
 
   // Fly to focused location only when the user explicitly selects/changes a location after mount
   useEffect(() => {
@@ -942,7 +985,7 @@ export default function MarsGlobe({
       })
     } else {
       viewer.camera.flyTo({
-        destination: at(77, 18, ORBIT_HEIGHT),
+        destination: at(77, 18, getOrbitHeight(viewer)),
         duration: 1.6,
         complete: () => sharedGlobe?.startSpin(),
       })

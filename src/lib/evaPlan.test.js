@@ -5,6 +5,8 @@ import { commsDelay } from './commsDelay.js'
 import { planEva } from './evaPlan.js'
 import { evaPlanText, evaPlanJson } from './exportRoute.js'
 import { planRealRoute, shortcutPath } from './realRoute.js'
+import { roverAnalysis, safeStops } from './rover.js'
+import { buildSafetyBrief } from './safetyBrief.js'
 
 const d = (s) => new Date(`${s}T00:00:00Z`)
 const NILI = { id: 'nili', name: 'Nili Fossae', lat: 21.0, lon: 74.5 }
@@ -93,6 +95,33 @@ test('mission card text and JSON export are well formed', async () => {
   const txt = evaPlanText(route, plan)
   assert.match(txt, /REDMAP EVA MISSION CARD/)
   assert.match(txt, /Nili Fossae -> Jezero Crater/)
+  assert.match(txt, /Rover Dyn:/)
   const json = JSON.parse(evaPlanJson(route, plan))
   assert.equal(json.eva.sols.length, plan.sols.length)
 })
+
+test('Newtonian rover dynamics and aerospace safety brief evaluate route properly', async () => {
+  const { route, plan } = await sample()
+  const rv = roverAnalysis(route.points)
+  assert.ok(rv.totalKwh > 0)
+  assert.ok(rv.usableKwh > 0)
+  assert.ok(rv.safeStops.length > 0)
+  assert.ok(safeStops(route.points, rv).length > 0)
+
+  const brief = buildSafetyBrief(route, plan, null)
+  assert.ok(['GO', 'CAUTION', 'NO-GO'].includes(brief.verdict))
+  assert.ok(brief.checks.length >= 6)
+})
+
+test('custom detour waypoints and corridorStops are included in planned route', async () => {
+  const pois = [
+    { id: 'close-poi', name: 'Close POI', lat: 19.7, lon: 76.05, note: 'near', source: 'HiRISE' },
+    { id: 'corridor-poi', name: 'Lateral POI', lat: 19.85, lon: 76.25, note: 'corridor', source: 'CRISM' },
+  ]
+  const customWaypoints = [{ id: 'custom-1', name: 'Detour 1', lat: 19.9, lon: 75.8 }]
+  const route = await planRealRoute(NILI, JEZERO, settings({ customWaypoints }), { ...flat, pois })
+  assert.ok(route.waypoints.some((w) => w.kind === 'custom'))
+  assert.ok(Array.isArray(route.corridorStops))
+  assert.ok(route.corridorStops.length >= 1)
+})
+

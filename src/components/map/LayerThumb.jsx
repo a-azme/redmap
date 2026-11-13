@@ -50,7 +50,7 @@ async function build(layerId) {
 
 const cache = new Map()
 
-export default function LayerThumb({ layerId, grad }) {
+export default function LayerThumb({ layerId, grad, className = 'h-[64px]' }) {
   const [src, setSrc] = useState(null)
 
   useEffect(() => {
@@ -65,7 +65,7 @@ export default function LayerThumb({ layerId, grad }) {
   }, [layerId])
 
   return (
-    <div className={`relative h-[64px] overflow-hidden bg-gradient-to-br ${grad}`}>
+    <div className={`relative overflow-hidden bg-gradient-to-br ${grad} ${className}`}>
       {src && (
         <img
           src={src}

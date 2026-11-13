@@ -107,7 +107,18 @@ export async function planRouteAsync(start, end, settings) {
 
 const tick = () => new Promise((r) => setTimeout(r, 0)) // let the page paint and respond between planning steps
 const CACHE = new Map()
-const cacheKey = (start, end, s) => [start.id, end.id, s.maxSlopeDeg, s.evaHoursPerSol, s.showScience, s.avoidRough].join('|')
+const cacheKey = (start, end, s) =>
+  [
+    start.id,
+    end.id,
+    s.maxSlopeDeg,
+    s.evaHoursPerSol,
+    s.showScience,
+    s.avoidRough,
+    s.keepOut !== false,
+    s.avoidLows !== false,
+    (s.customWaypoints || []).map((w) => `${w.lat.toFixed(4)},${w.lon.toFixed(4)}`).join(';'),
+  ].join('|')
 
 /**
  * Plans fastest, safest and most-scientific routes for the same trip, each refined against its own goal.
@@ -156,8 +167,9 @@ export async function planAllModes(start, end, settings, { onUpdate, cancelled =
   for (const mode of order) {
     await tick()
     if (cancelled()) return null
-    // a long trip: re-plan it in hops on fine grids, so craters and rims the overview grid cannot see are avoided
+    // a long trip: re-plan the active selected mode in hops on fine grids, so craters and rims the overview grid cannot see are avoided
     if (plain[mode] && plain[mode].distanceKm > HOP_MIN_TRIP_KM) {
+      if (mode !== settings.mode) continue
       try {
         const hopped = await planRouteAsync(start, end, { ...settings, mode, hops: true })
         if (cancelled()) return null
@@ -169,7 +181,7 @@ export async function planAllModes(start, end, settings, { onUpdate, cancelled =
     try {
       const seeds = seedsFor[mode].filter(Boolean)
       const g = goalFor(mode, seeds)
-      const { best, accepted } = await searchBlend(planAt(mode, g.from), { ...g, seeds, steps: 3 })
+      const { best, accepted } = await searchBlend(planAt(mode, g.from), { ...g, seeds, steps: 2 })
       if (!best || best === plain[mode]) continue
       // a seed from another mode won: plan it again under this mode so its speed and labels are consistent
       const final = best.mode === mode ? best : await planAt(mode, g.from)(best.mode === 'safest' ? 1 : 0)
@@ -188,3 +200,4 @@ export async function planAllModes(start, end, settings, { onUpdate, cancelled =
   push(true)
   return result
 }
+

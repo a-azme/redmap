@@ -60,3 +60,27 @@ export function fmtClock(marsHours) {
   if (mm === 60) { hh = (hh + 1) % 24; mm = 0 }
   return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
 }
+
+/**
+ * Coordinated Mars Time (MTC) and Mars Sol Date (MSD) from Allison & McEwen (2000).
+ * Returns { msd, mtcHours, mtcClock, mtcFull }
+ */
+export function coordinatedMarsTime(date = new Date()) {
+  const jdUtc = julianDay(date)
+  // TT - UTC ≈ 69.184 s
+  const jdTt = jdUtc + 69.184 / 86400
+  const msd = (jdTt - 2451549.5) / 1.0274912517 + 44796.0 - 0.0009626
+  const mtcHours = ((msd % 1) + 1) % 1 * 24
+  const hh = Math.floor(mtcHours)
+  const remMin = (mtcHours - hh) * 60
+  const mm = Math.floor(remMin)
+  const ss = Math.floor((remMin - mm) * 60)
+  const pad = (n) => String(n).padStart(2, '0')
+  return {
+    msd: Math.floor(msd),
+    mtcHours,
+    mtcClock: `${pad(hh)}:${pad(mm)}`,
+    mtcFull: `${pad(hh)}:${pad(mm)}:${pad(ss)}`,
+  }
+}
+

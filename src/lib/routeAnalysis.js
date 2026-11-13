@@ -28,9 +28,38 @@ export function haversineKm(a, b) {
   return 2 * MARS_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(h)))
 }
 
-// Rough surface temperature estimate (deg C). Colder towards the poles and with altitude.
-export const estimateTempC = (latDeg, elevKm) =>
-  Math.round(-45 - Math.abs(latDeg) * 0.6 - elevKm * 1.5)
+// Calibrated Martian surface thermal model grounded in Curiosity REMS (Gale Crater, -4.6°N, -4.4 km)
+// and Perseverance MEDA (Jezero Crater, +18.4°N, -2.6 km) seasonal & diurnal measurements.
+export function estimateMarsThermal(latDeg = -4.6, elevKm = -4.0, lsDeg = 180) {
+  const radAngle = (d) => (d * Math.PI) / 180
+  // Solar declination (-25.19° to +25.19°)
+  const declDeg = (Math.asin(Math.sin(radAngle(25.19)) * Math.sin(radAngle(lsDeg))) * 180) / Math.PI
+  // Noon solar zenith angle cosine factor
+  const zenithDeg = Math.min(88, Math.abs(latDeg - declDeg))
+  const insolation = Math.max(0.15, Math.cos(radAngle(zenithDeg)))
+  // Martian orbital eccentricity (e = 0.0934, perihelion at Ls ≈ 251°)
+  const orbitalDeltaC = 9.5 * Math.cos(radAngle(lsDeg - 251))
+  // Elevation lapse & thermal inertia effect (~ -2.1°C per km above MOLA datum)
+  const elevDeltaC = -2.1 * (elevKm + 3.5)
+
+  // Daytime peak (~14:00 LMST), sunlit EVA mean (~09:00-15:00 LMST), and pre-dawn low (~05:00 LMST)
+  const dayMaxC = Math.round(-36 + 24 * insolation + orbitalDeltaC + elevDeltaC)
+  const nightMinC = Math.round(-86 + 9 * insolation + 0.45 * orbitalDeltaC + 1.2 * elevDeltaC)
+  const evaMeanC = Math.round(0.62 * dayMaxC + 0.38 * nightMinC)
+  const instrument = latDeg >= 5 ? 'Perseverance MEDA' : 'Curiosity REMS'
+
+  return {
+    dayMaxC,
+    evaMeanC,
+    nightMinC,
+    diurnalSwingC: dayMaxC - nightMinC,
+    instrument,
+  }
+}
+
+// Surface temperature estimate (deg C) during nominal sunlit EVA window
+export const estimateTempC = (latDeg, elevKm, lsDeg = 180) =>
+  estimateMarsThermal(latDeg, elevKm, lsDeg).evaMeanC
 
 /**
  * Turns a list of route points into the full route object the UI consumes
@@ -40,7 +69,7 @@ export const estimateTempC = (latDeg, elevKm) =>
  * stops:  [{ id, title, source, detail, km, lat, lon, elevKm }]
  * dataSource: { real: boolean, name?, resolutionKm?, note? }
  */
-export function finalizeRoute({ start, end, settings, points, distanceKm, stops = [], waypoints = [], why = null, hazard = null, legs = [], dataSource }) {
+export function finalizeRoute({ start, end, settings, points, distanceKm, stops = [], corridorStops = null, customWaypoints = [], waypoints = [], why = null, hazard = null, legs = [], shelterPoint = null, dataSource }) {
   const mode = MODES[settings.mode] ?? MODES.fastest
 
   let gain = 0, loss = 0
@@ -149,7 +178,11 @@ export function finalizeRoute({ start, end, settings, points, distanceKm, stops 
     elevationGainKm: +gain.toFixed(2), elevationLossKm: +loss.toFixed(2),
     avgSlopeDeg, maxSlopeDeg, minTempC, radiationMsv, risk, riskParts,
     riskLabel: risk < 25 ? 'Low' : risk < 55 ? 'Moderate' : 'High',
-    points, path: points.map((p) => ({ lat: p.lat, lon: p.lon })), warnings, stops, waypoints, why, hazard, legs: legsOut,
+    points, path: points.map((p) => ({ lat: p.lat, lon: p.lon })), warnings, stops,
+    corridorStops: corridorStops ?? stops,
+    customWaypoints,
+    waypoints, why, hazard, legs: legsOut,
+    shelterPoint,
     dataSource: dataSource ?? { real: false },
   }
 }

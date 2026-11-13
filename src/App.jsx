@@ -1,20 +1,19 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import MainLayout from './layouts/MainLayout'
 import ExplorePage from './pages/ExplorePage'
-import LayersPage from './pages/LayersPage'
-import MissionsPage from './pages/MissionsPage'
+import GuidePage from './pages/GuidePage'
 import RoutePlannerPage from './pages/RoutePlannerPage'
-import SciencePage from './pages/SciencePage'
 
 export default function App() {
   return (
     <Routes>
       <Route element={<MainLayout />}>
         <Route path="/" element={<ExplorePage />} />
-        <Route path="/layers" element={<LayersPage />} />
-        <Route path="/missions" element={<MissionsPage />} />
+        <Route path="/layers" element={<Navigate to="/" replace />} />
+        <Route path="/missions" element={<Navigate to="/?tab=missions" replace />} />
         <Route path="/route" element={<RoutePlannerPage />} />
-        <Route path="/science" element={<SciencePage />} />
+        <Route path="/guide" element={<GuidePage />} />
+        <Route path="/science" element={<Navigate to="/route" replace />} />
       </Route>
     </Routes>
   )

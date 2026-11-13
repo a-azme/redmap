@@ -3,6 +3,11 @@ import { TILE_LAYERS } from '../../services/layerService'
 
 // Prottek location er jonno zoom level (boro feature e kom zoom)
 const ZOOM = {
+  gediz: 5,
+  boxwork: 5,
+  bradbury: 5,
+  yellowknife: 5,
+  sulfate: 5,
   jezero: 5,
   nili: 5,
   tyrrhena: 4,
