@@ -1,7 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import { TILE_LAYERS } from '../../services/layerService'
+import { getPovForStop } from '../../services/surfacePovService'
 
-// Prottek location er jonno zoom level (boro feature e kom zoom)
+// Local rover sites within Gale/Jezero craters (< 40 km span) share the same global z=5 orbital tile,
+// so use their verified, site-specific NASA PIA thumbnail first and fall back to the orbital tile stitch if offline.
+const LOCAL_SITE_IDS = new Set([
+  'gediz',
+  'boxwork',
+  'bradbury',
+  'yellowknife',
+  'sulfate',
+  'butler',
+  'delta',
+  'neretva',
+])
+
 const ZOOM = {
   gediz: 5,
   boxwork: 5,
@@ -31,7 +44,7 @@ function getThumbZoom(loc) {
 
 const TILE = 256
 const OUT = 160 // thumbnail pixel size
-const CROP = 192 // tile theke koto pixel kete nibo
+const CROP = 192 // tile crop window
 
 const norm = (lon) => (lon > 180 ? lon - 360 : lon)
 
@@ -48,6 +61,14 @@ const tileUrl = (tpl, ext, z, x, y) =>
   tpl.replace('{ext}', ext).replace('{z}', z).replace('{y}', y).replace('{x}', x)
 
 async function build(loc) {
+  if (LOCAL_SITE_IDS.has(loc.id)) {
+    const pov = getPovForStop({ id: loc.id, lat: loc.lat, lon: loc.lon })
+    const nasaThumb = pov?.thumbUrl || pov?.imageUrl
+    if (nasaThumb) {
+      return nasaThumb
+    }
+  }
+
   const src = TILE_LAYERS.terrain.sources[0]
   const z = getThumbZoom(loc)
   const rows = 2 ** z
@@ -57,7 +78,6 @@ async function build(loc) {
   const tx = Math.floor(fx)
   const ty = Math.floor(fy)
 
-  // Majher tile diye jpg/png thik kori
   let ext = 'jpg'
   let center = await load(tileUrl(src.url, 'jpg', z, tx, ty))
   if (!center) {
@@ -66,7 +86,6 @@ async function build(loc) {
   }
   if (!center) return null
 
-  // 3x3 tile jure majhkhane location rakhi
   const big = document.createElement('canvas')
   big.width = TILE * 3
   big.height = TILE * 3
@@ -101,7 +120,7 @@ async function build(loc) {
   try {
     return out.toDataURL('image/jpeg', 0.85)
   } catch {
-    return tileUrl(src.url, ext, z, tx, ty) // canvas block hole shudhu majher tile
+    return tileUrl(src.url, ext, z, tx, ty)
   }
 }
 
@@ -153,7 +172,13 @@ export default function LocationThumb({ loc, className = '' }) {
       style={{ background: `linear-gradient(135deg, ${loc.color}, #1a0b08)` }}
     >
       {src && (
-        <img src={src} alt={loc.name} draggable={false} className="h-full w-full object-cover" />
+        <img
+          src={src}
+          alt={loc.name}
+          draggable={false}
+          referrerPolicy="no-referrer"
+          className="h-full w-full object-cover"
+        />
       )}
     </div>
   )

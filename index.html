@@ -139,8 +139,7 @@
         if (!splash) return;
 
         var start = Date.now();
-        var MIN_MS = 1200;
-        var MAX_MS = 3500;
+        var MIN_MS = 900;
         var bg = document.getElementById('rm-splash-bg');
         if (bg) {
           var show = function () { bg.classList.add('ready'); };
@@ -160,8 +159,11 @@
         function scheduleDismiss() {
           setTimeout(dismiss, Math.max(0, MIN_MS - (Date.now() - start)));
         }
-        window.addEventListener('rm:ready', scheduleDismiss, { once: true });
-        setTimeout(dismiss, MAX_MS);
+        if (window.__rmGlobeReady) {
+          scheduleDismiss();
+        } else {
+          window.addEventListener('rm:ready', scheduleDismiss, { once: true });
+        }
       })();
     </script>
     <script type="module" src="/src/main.jsx"></script>

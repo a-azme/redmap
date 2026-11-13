@@ -3,35 +3,6 @@ const TREK = 'https://trek.nasa.gov/tiles/Mars/EQ'
 const trek = (product) =>
   `${TREK}/${product}/1.0.0/default/default028mm/{z}/{y}/{x}.{ext}`
 
-// High-resolution regional overlays (Jezero Crater + Gale Crater / Mount Sharp)
-// rect = [west, south, east, north]
-const HIGH_RES_OVERLAYS = [
-  {
-    name: 'MRO CTX Jezero mosaic (6 m)',
-    url: trek('Jezero_CTX_BlockAdj_dd'),
-    rect: [75.15, 15.9, 78.87, 19.45],
-    maxNativeZoom: 10,
-  },
-  {
-    name: 'MRO HiRISE Jezero mosaic (25 cm)',
-    url: trek('JEZ_hirise_soc_006_orthoMosaic_25cm_Eqc_latTs0_lon0_first_dd'),
-    rect: [77.2229, 18.3068, 77.584, 18.6693],
-    maxNativeZoom: 16,
-  },
-  {
-    name: 'MRO CTX Gale Crater & Mount Sharp mosaic (5 m)',
-    url: trek('Gale_CTX_BlockAdj_dd'),
-    rect: [135.1843, -6.5733, 139.2413, -2.8078],
-    maxNativeZoom: 12,
-  },
-  {
-    name: 'MRO HiRISE Curiosity & Mount Sharp mosaic (25 cm)',
-    url: trek('curiosity_hirise_mosaic'),
-    rect: [137.1225, -4.9255, 137.7298, -4.249],
-    maxNativeZoom: 16,
-  },
-]
-
 const VIKING = {
   name: 'Viking MDIM 2.1 color mosaic',
   url: trek('Mars_Viking_MDIM21_ClrMosaic_global_232m'),
@@ -48,7 +19,7 @@ export const LAYER_CATALOG = [
     name: 'Terrain',
     short: 'Terrain',
     shortName: 'Terrain',
-    sub: 'Surface features & HiRISE/CTX',
+    sub: 'Viking global color mosaic',
     grad: 'from-orange-700 to-orange-950',
   },
   {
@@ -97,15 +68,15 @@ export const LAYER_CATALOG = [
 // legend: { bar, labels } shudhu jekhane color er mane nishchit
 export const TILE_LAYERS = {
   terrain: {
-    title: 'Terrain (HiRISE 25 cm + CTX 5 m)',
-    note: 'Natural color global mosaic overlaid with MRO CTX (5 m/px) and MRO HiRISE (25 cm/px) surface orthomosaics.',
+    title: 'Terrain',
+    note: 'Global 232 m/px color mosaic mapped by NASA Viking Orbiters.',
     sources: [VIKING],
-    overlays: HIGH_RES_OVERLAYS,
+    overlays: [],
     legend: null,
   },
   elevation: {
-    title: 'Elevation (MGS MOLA + HRSC)',
-    note: 'Color shows height above/below the Mars reference level. Blue tones are lower ground and warm/light tones are higher ground.',
+    title: 'Elevation',
+    note: 'Topographic height relative to Mars datum (blue = basins, red/white = highlands).',
     sources: [
       {
         name: 'MOLA + HRSC blended color shaded relief (200 m)',
@@ -124,8 +95,8 @@ export const TILE_LAYERS = {
     },
   },
   geo: {
-    title: 'Geological Features (HRSC + CTX)',
-    note: 'Landforms: craters, ridges, canyons and volcanoes. Shows surface morphology and slope shading.',
+    title: 'Geological Features',
+    note: 'Surface morphology and slope relief across craters, troughs, and volcanic shields.',
     sources: [
       {
         name: 'MOLA + HRSC blended shaded relief (200 m)',
@@ -135,29 +106,34 @@ export const TILE_LAYERS = {
     ],
     legend: {
       bar: 'linear-gradient(to right, #111, #888, #eee)',
-      labels: ['Shaded side', 'Sunlit side'],
+      labels: ['Shaded', 'Sunlit'],
     },
   },
   minerals: {
-    title: 'Minerals (MGS TES / CRISM)',
-    note: 'Global map of clay-like (sheet silicate) minerals from MGS TES. Colors show relative mineral abundance.',
+    title: 'Minerals',
+    note: 'Global sheet silicate and clay mineral abundance mapped by MGS TES.',
     sources: [
-      { name: 'MGS TES sheet silicates / high-Si glass', url: trek('TES_Glass_Clay'), maxNativeZoom: 3 },
+      { name: 'MGS TES sheet silicates / high-Si glass', url: trek('TES_Glass_Clay'), maxNativeZoom: 1 },
     ],
     legend: {
       bar: 'linear-gradient(to right, #1e1b4b, #4338ca, #22c55e, #facc15, #ef4444)',
-      labels: ['Low abundance', 'High clay/silicate'],
+      labels: ['Low', 'High clay/silicate'],
     },
   },
   temp: {
-    title: 'Thermal Inertia (Odyssey THEMIS 100 m)',
-    note: 'Daytime thermal infrared brightness (Mars Odyssey THEMIS, 100 m/px). Covers 65°S to 65°N.',
+    title: 'Thermal Inertia',
+    note: 'Mars Odyssey THEMIS daytime thermal IR mosaic (100 m/px, 65°S–65°N) over MGS TES global thermal inertia.',
     sources: [
       {
         name: 'Mars Odyssey THEMIS day IR mosaic (100 m)',
         url: trek('THEMIS_DayIR_ControlledMosaics_100m_v2_oct2018'),
         maxNativeZoom: 8,
         colorize: true,
+      },
+      {
+        name: 'MGS TES global thermal inertia',
+        url: trek('TES_Thermal_Inertia'),
+        maxNativeZoom: 1,
       },
     ],
     legend: {
@@ -166,19 +142,19 @@ export const TILE_LAYERS = {
     },
   },
   atmo: {
-    title: 'Atmosphere (TES Dust Opacity)',
-    note: 'Atmospheric dust opacity mapped by Mars Global Surveyor TES.',
-    sources: [{ name: 'MGS TES global dust', url: trek('TES_Dust'), maxNativeZoom: 3 }],
+    title: 'Atmosphere',
+    note: 'Global atmospheric dust optical depth mapped by Mars Global Surveyor TES.',
+    sources: [{ name: 'MGS TES global dust', url: trek('TES_Dust'), maxNativeZoom: 1 }],
     legend: {
       bar: 'linear-gradient(to right, #0c4a6e, #38bdf8, #f59e0b, #dc2626)',
-      labels: ['Clear sky', 'High dust opacity'],
+      labels: ['Clear sky', 'High dust'],
     },
   },
   missions: {
     title: 'NASA Missions',
-    note: 'Blue markers show NASA rover and lander surface sites.',
+    note: 'Surface markers for NASA rovers and landers across Mars.',
     sources: [VIKING],
-    overlays: HIGH_RES_OVERLAYS,
+    overlays: [],
     legend: null,
   },
 }

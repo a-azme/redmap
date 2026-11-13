@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import OpenSeadragon from 'openseadragon'
 import { Plus, Minus, Crosshair, RotateCcw, MapPin } from 'lucide-react'
-import { LOCATIONS, fmtCoord } from './routeUtils'
+import { fmtCoord } from './routeUtils'
 import { hazardRectangle, getHazardDataUrl } from '../../lib/hazardImage.js'
 
 // Mars Equirectangular (EPSG:4326) world coordinate helpers for OpenSeadragon:
@@ -53,17 +53,7 @@ const EVA_SECTORS = {
   },
 }
 
-function computeSectorBounds(sectorKey, path) {
-  if (path?.length) {
-    const firstLon = toLon180(path[0].lon)
-    const firstLat = path[0].lat
-    if (firstLat > 5 && firstLon > 65 && firstLon < 90) {
-      return EVA_SECTORS.jezero
-    }
-    if (firstLat < 5 && firstLon > 125 && firstLon < 150) {
-      return EVA_SECTORS.gale
-    }
-  }
+function computeSectorBounds(sectorKey) {
   return sectorKey === 'jezero' ? EVA_SECTORS.jezero : EVA_SECTORS.gale
 }
 
@@ -137,6 +127,7 @@ function buildLayerStack(layerKey, sectorId) {
           urlTemplate:
             'https://trek.nasa.gov/tiles/Mars/EQ/Mars_MGS_MOLA_ClrShade_merge_global_463m/1.0.0/default/default028mm/{z}/{row}/{col}.jpg',
           maxLevel: 6,
+          minZoom: 4,
           bbox: sectorBbox,
         }),
         overlays: [],
@@ -147,6 +138,7 @@ function buildLayerStack(layerKey, sectorId) {
           urlTemplate:
             'https://trek.nasa.gov/tiles/Mars/EQ/Mars_MOLA_blend200ppx_HRSC_ClrShade_clon0dd_200mpp_lzw/1.0.0/default/default028mm/{z}/{row}/{col}.jpg',
           maxLevel: 7,
+          minZoom: 4,
           bbox: sectorBbox,
         }),
         overlays: [],
@@ -157,6 +149,7 @@ function buildLayerStack(layerKey, sectorId) {
           urlTemplate:
             'https://trek.nasa.gov/tiles/Mars/EQ/Mars_MOLA_blend200ppx_HRSC_Shade_clon0dd_200mpp_lzw/1.0.0/default/default028mm/{z}/{row}/{col}.jpg',
           maxLevel: 7,
+          minZoom: 4,
           bbox: sectorBbox,
         }),
         overlays: [
@@ -177,6 +170,7 @@ function buildLayerStack(layerKey, sectorId) {
           urlTemplate:
             'https://trek.nasa.gov/tiles/Mars/EQ/THEMIS_DayIR_ControlledMosaics_100m_v2_oct2018/1.0.0/default/default028mm/{z}/{row}/{col}.png',
           maxLevel: 8,
+          minZoom: 4,
           bbox: sectorBbox,
         }),
         overlays: [],
@@ -187,6 +181,7 @@ function buildLayerStack(layerKey, sectorId) {
           urlTemplate:
             'https://trek.nasa.gov/tiles/Mars/EQ/Mars_MOLA_blend200ppx_HRSC_Shade_clon0dd_200mpp_lzw/1.0.0/default/default028mm/{z}/{row}/{col}.jpg',
           maxLevel: 7,
+          minZoom: 4,
           bbox: sectorBbox,
         }),
         overlays: [
@@ -204,14 +199,15 @@ function buildLayerStack(layerKey, sectorId) {
     case 'terrain':
     default: {
       // Strictly 2 nested layers per crater:
-      // 1. Parent Base Layer: Regional CTX Block-Adjusted Mosaic (z = 0..12, covers 100% of sector viewport)
-      // 2. Child Overlay Layer: High-Resolution HiRISE Ortho-Mosaic (z = 0..16, 100% contained inside parent CTX)
+      // 1. Parent Base Layer: Regional CTX Block-Adjusted Mosaic (z = 5..12, covers 100% of sector viewport)
+      // 2. Child Overlay Layer: High-Resolution HiRISE Ortho-Mosaic (z = 10..16, 100% contained inside parent CTX)
       if (sector.id === 'jezero') {
         return {
           base: createMarsTileSource({
             urlTemplate:
               'https://trek.nasa.gov/tiles/Mars/EQ/Jezero_CTX_BlockAdj_dd/1.0.0/default/default028mm/{z}/{row}/{col}.png',
             maxLevel: 12,
+            minZoom: 5,
             bbox: EVA_SECTORS.jezero.ctxBbox,
           }),
           overlays: [
@@ -221,6 +217,7 @@ function buildLayerStack(layerKey, sectorId) {
                 urlTemplate:
                   'https://trek.nasa.gov/tiles/Mars/EQ/JEZ_hirise_soc_006_orthoMosaic_25cm_Eqc_latTs0_lon0_first_dd/1.0.0/default/default028mm/{z}/{row}/{col}.png',
                 maxLevel: 16,
+                minZoom: 10,
                 bbox: { west: 77.2229331, south: 18.3067994, east: 77.583964, north: 18.669315 },
               }),
             },
@@ -233,6 +230,7 @@ function buildLayerStack(layerKey, sectorId) {
           urlTemplate:
             'https://trek.nasa.gov/tiles/Mars/EQ/Gale_CTX_BlockAdj_dd/1.0.0/default/default028mm/{z}/{row}/{col}.png',
           maxLevel: 12,
+          minZoom: 5,
           bbox: EVA_SECTORS.gale.ctxBbox,
         }),
         overlays: [
@@ -242,6 +240,7 @@ function buildLayerStack(layerKey, sectorId) {
               urlTemplate:
                 'https://trek.nasa.gov/tiles/Mars/EQ/curiosity_hirise_mosaic/1.0.0/default/default028mm/{z}/{row}/{col}.png',
               maxLevel: 16,
+              minZoom: 10,
               bbox: { west: 137.1224669, south: -4.9254743, east: 137.7298129, north: -4.2489588 },
             }),
           },
@@ -251,8 +250,11 @@ function buildLayerStack(layerKey, sectorId) {
   }
 }
 
+const MAX_ALLOWED_ZOOM = 28000
+
 export default function RouteMap({
   route,
+  pendingEndpoints = null,
   sectorKey = 'gale',
   hazard = 'off',
   layer = 'terrain',
@@ -261,32 +263,40 @@ export default function RouteMap({
   activePoint = null,
   scrubPoint = null,
   onSelectPoint,
-  addWaypointMode = false,
-  onToggleAddWaypointMode,
-  onMapAddWaypoint,
+  customWaypoints = [],
+  mapPickMode = null,
+  onExitPickMode,
+  onMapPickPoint,
 }) {
   const containerRef = useRef(null)
   const osdRef = useRef(null)
   const viewerRef = useRef(null)
   const lastFitKeyRef = useRef('')
   const sectorRectRef = useRef(null)
+  const clampRectRef = useRef(null)
   const activeSectorRef = useRef(null)
-  const addWaypointModeRef = useRef(addWaypointMode)
-  const onMapAddWaypointRef = useRef(onMapAddWaypoint)
+  const routeRef = useRef(route)
+  const focusRef = useRef(focus)
+  const mapPickModeRef = useRef(mapPickMode)
+  const onMapPickPointRef = useRef(onMapPickPoint)
   const syncOverlayRef = useRef(null)
   const overlayItemsRef = useRef(null)
   const playheadWorldRef = useRef(null)
 
   useEffect(() => {
-    addWaypointModeRef.current = addWaypointMode
-    onMapAddWaypointRef.current = onMapAddWaypoint
-  }, [addWaypointMode, onMapAddWaypoint])
+    routeRef.current = route
+    focusRef.current = focus
+  }, [route, focus])
+
+  useEffect(() => {
+    mapPickModeRef.current = mapPickMode
+    onMapPickPointRef.current = onMapPickPoint
+  }, [mapPickMode, onMapPickPoint])
 
   // Direct DOM refs for synchronous, zero-lag overlay updates during map pan/zoom
   const hazardImgRef = useRef(null)
   const svgGlowRef = useRef(null)
   const svgLineRef = useRef(null)
-  const ctxPinRefs = useRef(new Map())
   const markerRefs = useRef(new Map())
   const playheadRef = useRef(null)
   const playheadTagRef = useRef(null)
@@ -294,10 +304,7 @@ export default function RouteMap({
   const scaleBarRef = useRef(null)
   const hoverCoordRef = useRef(null)
 
-  const activeSector = useMemo(
-    () => computeSectorBounds(sectorKey, route?.path),
-    [sectorKey, route?.path]
-  )
+  const activeSector = useMemo(() => computeSectorBounds(sectorKey), [sectorKey])
   const layerStack = useMemo(
     () => buildLayerStack(layer, activeSector.id),
     [layer, activeSector.id]
@@ -306,10 +313,16 @@ export default function RouteMap({
   useEffect(() => {
     activeSectorRef.current = activeSector
     sectorRectRef.current = bboxToWorldRect(activeSector.bbox)
+    clampRectRef.current = bboxToWorldRect(activeSector.ctxBbox)
   }, [activeSector])
 
-  const computeRouteWorldRect = (r, isFocus = focus) => {
-    const sb = activeSector.bbox
+  const computeRouteWorldRect = (
+    r,
+    isFocus = focus,
+    sec = activeSector
+  ) => {
+    const sb = sec.bbox
+    const cb = sec.ctxBbox
     if (!r?.path?.length) {
       return bboxToWorldRect(sb)
     }
@@ -320,6 +333,11 @@ export default function RouteMap({
     const minLat = Math.min(...lats)
     const maxLat = Math.max(...lats)
 
+    // Guard against routes belonging to a different crater sector
+    if (maxLon < cb.west || minLon > cb.east || maxLat < cb.south || minLat > cb.north) {
+      return bboxToWorldRect(sb)
+    }
+
     const spanLon = Math.max(0.06, maxLon - minLon)
     const spanLat = Math.max(0.05, maxLat - minLat)
     const padLon = spanLon * (isFocus ? 0.35 : 0.7)
@@ -328,12 +346,16 @@ export default function RouteMap({
     const lonShift = isFocus ? 0 : spanLon * 0.02
     const latShift = isFocus ? 0 : -spanLat * 0.12
 
-    return bboxToWorldRect({
-      west: Math.max(sb.west, minLon - padLon + lonShift),
-      east: Math.min(sb.east, maxLon + padLon + lonShift),
-      south: Math.max(sb.south, minLat - padLat + latShift),
-      north: Math.min(sb.north, maxLat + padLat + latShift),
-    })
+    const west = Math.max(sb.west, minLon - padLon + lonShift)
+    const east = Math.min(sb.east, maxLon + padLon + lonShift)
+    const south = Math.max(sb.south, minLat - padLat + latShift)
+    const north = Math.min(sb.north, maxLat + padLat + latShift)
+
+    if (east <= west || north <= south) {
+      return bboxToWorldRect(sb)
+    }
+
+    return bboxToWorldRect({ west, east, south, north })
   }
 
   const routeHazard = route?.hazard
@@ -355,32 +377,37 @@ export default function RouteMap({
 
   const routePath = route?.path
   const routeWarnings = route?.warnings
-  const routeWaypoints = route?.waypoints
   const routeStops = route?.stops
+  const routeCustomWaypoints = route?.customWaypoints
   const routeShelter = route?.shelterPoint
   const routeStart = route?.start
   const routeEnd = route?.end
   const routeDistanceKm = route?.distanceKm
 
-  // Precompute world coordinates (wx, wy) for path, pins, and markers (decoupled from scrubPoint)
+  const isPointInSector = (pt, sector) => {
+    if (!pt || typeof pt.lat !== 'number' || typeof pt.lon !== 'number') return false
+    const lon = toLon180(pt.lon)
+    const cb = sector.ctxBbox
+    return lon >= cb.west && lon <= cb.east && pt.lat >= cb.south && pt.lat <= cb.north
+  }
+
+  const validPendingStart = isPointInSector(pendingEndpoints?.start, activeSector) ? pendingEndpoints.start : null
+  const validPendingEnd = isPointInSector(pendingEndpoints?.end, activeSector) ? pendingEndpoints.end : null
+  const effectiveStart = validPendingStart || (isPointInSector(routeStart, activeSector) ? routeStart : null)
+  const effectiveEnd = validPendingEnd || (isPointInSector(routeEnd, activeSector) ? routeEnd : null)
+
+  // Precompute world coordinates (wx, wy) strictly for spots belonging to the currently planned path
   const overlayItems = useMemo(() => {
+    const checkSector = (pt) => {
+      if (!pt || typeof pt.lat !== 'number' || typeof pt.lon !== 'number') return false
+      const lon = toLon180(pt.lon)
+      const cb = activeSector.ctxBbox
+      return lon >= cb.west && lon <= cb.east && pt.lat >= cb.south && pt.lat <= cb.north
+    }
+
     const pathWorld = (routePath || []).map((p) => ({
       wx: lonToWorldX(p.lon),
       wy: latToWorldY(p.lat),
-    }))
-
-    const contextPins = LOCATIONS.filter((l) => {
-      if (routeStart && routeEnd && (l.id === routeStart.id || l.id === routeEnd.id)) return false
-      return (
-        l.lon >= activeSector.bbox.west &&
-        l.lon <= activeSector.bbox.east &&
-        l.lat >= activeSector.bbox.south &&
-        l.lat <= activeSector.bbox.north
-      )
-    }).map((l) => ({
-      ...l,
-      wx: lonToWorldX(l.lon),
-      wy: latToWorldY(l.lat),
     }))
 
     const markers = []
@@ -393,109 +420,122 @@ export default function RouteMap({
             kind: 'warning',
             badge: '▲',
             label: w.title,
+            tooltip: w.title,
             color: w.severity === 'critical' ? '#ff4d4d' : '#f5a524',
             wx: lonToWorldX(w.lon),
             wy: latToWorldY(w.lat),
-            alwaysBase: false,
-            showOnZoom: false,
+            priority: 5,
+            maxMPerPx: 0, // hover only
           })
         })
 
-      if (routeWaypoints?.length) {
-        routeWaypoints.forEach((w) => {
-          const isCustom = w.kind === 'custom'
-          const on = w.kind === 'stop' && selectedStopIds.includes(w.id)
-          const label = isCustom
-            ? `${w.name} (km ${w.km})`
-            : w.kind === 'stop'
-            ? `${w.n}. ${w.name}`
-            : `WP ${w.n} (${Math.abs(w.lat).toFixed(2)}°${w.lat >= 0 ? 'N' : 'S'}, ${w.lon.toFixed(2)}°E)`
-          markers.push({
-            id: 'wp-' + w.n,
-            kind: isCustom ? 'custom' : w.kind === 'stop' ? 'stop' : 'waypoint',
-            badge: isCustom ? `D` : String(w.n),
-            label,
-            color: isCustom ? '#38bdf8' : on ? '#4be08a' : '#f5c518',
-            wx: lonToWorldX(w.lon),
-            wy: latToWorldY(w.lat),
-            alwaysBase: isCustom,
-            showOnZoom: true,
-          })
+      // Strictly include only science stops that lie on the planned route path
+      const plannedStops = [...(routeStops || [])].sort((a, b) => a.km - b.km)
+
+      plannedStops.forEach((s, idx) => {
+        const on = selectedStopIds.includes(s.id)
+        markers.push({
+          id: 's-' + s.id,
+          kind: 'stop',
+          badge: String(idx + 1),
+          label: s.title,
+          tooltip: `${s.title} (km ${s.km}, ${fmtCoord(s.lat, s.lon)})`,
+          color: on ? '#4be08a' : '#f5c518',
+          wx: lonToWorldX(s.lon),
+          wy: latToWorldY(s.lat),
+          priority: 3,
+          maxMPerPx: 145,
         })
-      } else {
-        ;(routeStops || []).forEach((s, idx) => {
-          const on = selectedStopIds.includes(s.id)
-          markers.push({
-            id: 's-' + s.id,
-            kind: 'stop',
-            badge: `${idx + 1}`,
-            label: s.title,
-            color: on ? '#4be08a' : '#f5c518',
-            wx: lonToWorldX(s.lon),
-            wy: latToWorldY(s.lat),
-            alwaysBase: false,
-            showOnZoom: true,
-          })
-        })
-      }
+      })
 
       if (routeShelter) {
         markers.push({
           id: 'shelter',
           kind: 'shelter',
           badge: 'SH',
-          label: `Shelter (km ${routeShelter.km}, -${routeShelter.shieldingPct}% dose)`,
+          label: 'Radiation Shelter',
+          tooltip: `Radiation Shelter (km ${routeShelter.km}, -${routeShelter.shieldingPct}% dose)`,
           color: '#38bdf8',
           wx: lonToWorldX(routeShelter.lon),
           wy: latToWorldY(routeShelter.lat),
-          alwaysBase: false,
-          showOnZoom: true,
+          priority: 3,
+          maxMPerPx: 130,
         })
       }
+    }
 
+    if (effectiveStart) {
       markers.push({
         id: 'start',
         kind: 'start',
         badge: 'S',
-        label: routeStart.name,
+        label: effectiveStart.name,
+        tooltip: `Start: ${effectiveStart.name} (${fmtCoord(effectiveStart.lat, effectiveStart.lon)})`,
         color: '#2ecc71',
-        wx: lonToWorldX(routeStart.lon),
-        wy: latToWorldY(routeStart.lat),
-        alwaysBase: true,
-        showOnZoom: true,
+        wx: lonToWorldX(effectiveStart.lon),
+        wy: latToWorldY(effectiveStart.lat),
+        priority: 1,
+        maxMPerPx: 420,
       })
+    }
 
+    if (effectiveEnd) {
       markers.push({
         id: 'end',
         kind: 'end',
         badge: 'D',
-        label: routeEnd.name,
+        label: effectiveEnd.name,
+        tooltip: `Destination: ${effectiveEnd.name} (${fmtCoord(effectiveEnd.lat, effectiveEnd.lon)})`,
         color: '#e5322d',
-        wx: lonToWorldX(routeEnd.lon),
-        wy: latToWorldY(routeEnd.lat),
-        alwaysBase: true,
-        showOnZoom: true,
+        wx: lonToWorldX(effectiveEnd.lon),
+        wy: latToWorldY(effectiveEnd.lat),
+        priority: 1,
+        maxMPerPx: 420,
+      })
+    }
+
+    // Custom detour stops placed by the user (snapped to the planned path once routed)
+    if (customWaypoints?.length) {
+      const routedCustom = routeCustomWaypoints || []
+      customWaypoints.forEach((cw, idx) => {
+        if (!checkSector(cw)) return
+        const matched = routedCustom.find((rc) => rc.id === cw.id) || cw
+        const cleanLabel = cw.name || `Detour Stop ${idx + 1}`
+        markers.push({
+          id: cw.id || `cwp-${idx + 1}`,
+          kind: 'custom',
+          badge: `D${idx + 1}`,
+          label: cleanLabel,
+          tooltip: `${cleanLabel} (${fmtCoord(matched.lat, matched.lon)})`,
+          color: '#38bdf8',
+          wx: lonToWorldX(matched.lon),
+          wy: latToWorldY(matched.lat),
+          priority: 2,
+          maxMPerPx: 240,
+        })
       })
     }
 
     return {
       pathWorld,
       hazardOverlay,
-      contextPins,
       markers,
     }
   }, [
     routePath,
     routeWarnings,
-    routeWaypoints,
     routeStops,
+    routeCustomWaypoints,
     routeShelter,
     routeStart,
     routeEnd,
+    effectiveStart,
+    effectiveEnd,
     routeDistanceKm,
     selectedStopIds,
     activeSector,
     hazardOverlay,
+    customWaypoints,
   ])
 
   // Keep ref in sync and immediately project whenever overlayItems changes
@@ -565,17 +605,21 @@ export default function RouteMap({
       },
     })
 
-    // Strictly keep the entire viewport inside sRect so the user never sees black void outside the CTX mosaic
-    // and never fights OpenSeadragon's zoom animation when clicking + / -.
+    // Ensure every TiledImage has coverage patched immediately when added to world (before first draw)
+    viewer.world.addHandler('add-item', (event) => {
+      patchTiledImageCoverage(event.item)
+    })
+
+    // Keep the viewport inside the CTX mosaic boundary (cRect) so the user never sees black void
+    // while allowing smooth zoom-out (-) and sector reposition (RotateCcw) without spring stutter.
     const clampToSector = () => {
-      const sRect = sectorRectRef.current
+      const cRect = clampRectRef.current || sectorRectRef.current
       const vp = viewer.viewport
-      if (!sRect || !vp) return
+      if (!cRect || !vp) return
 
       const aspect = Math.max(0.25, vp.getAspectRatio())
-      // Minimum zoom where the viewport (viewW = 1/z, viewH = viewW/aspect) fits 100% inside sRect
-      const minAllowedZoom = Math.max(1 / sRect.width, 1 / (sRect.height * aspect))
-      const maxAllowedZoom = 28000
+      const minAllowedZoom = Math.max(1 / cRect.width, 1 / (cRect.height * aspect))
+      const maxAllowedZoom = MAX_ALLOWED_ZOOM
 
       if (vp.zoomSpring.target.value < minAllowedZoom) {
         vp.zoomSpring.target.value = minAllowedZoom
@@ -593,15 +637,15 @@ export default function RouteMap({
         const z = Math.max(minAllowedZoom, Math.min(maxAllowedZoom, zoomVal))
         const viewW = 1 / z
         const viewH = viewW / aspect
-        const halfW = Math.min(sRect.width * 0.5, viewW * 0.5)
-        const halfH = Math.min(sRect.height * 0.5, viewH * 0.5)
-        const minX = sRect.x + halfW
-        const maxX = sRect.x + sRect.width - halfW
-        const minY = sRect.y + halfH
-        const maxY = sRect.y + sRect.height - halfH
+        const halfW = Math.min(cRect.width * 0.5, viewW * 0.5)
+        const halfH = Math.min(cRect.height * 0.5, viewH * 0.5)
+        const minX = cRect.x + halfW
+        const maxX = cRect.x + cRect.width - halfW
+        const minY = cRect.y + halfH
+        const maxY = cRect.y + cRect.height - halfH
         return {
-          x: minX <= maxX ? Math.max(minX, Math.min(maxX, cx)) : sRect.x + sRect.width * 0.5,
-          y: minY <= maxY ? Math.max(minY, Math.min(maxY, cy)) : sRect.y + sRect.height * 0.5,
+          x: minX <= maxX ? Math.max(minX, Math.min(maxX, cx)) : cRect.x + cRect.width * 0.5,
+          y: minY <= maxY ? Math.max(minY, Math.min(maxY, cy)) : cRect.y + cRect.height * 0.5,
         }
       }
 
@@ -613,13 +657,16 @@ export default function RouteMap({
       vp.centerSpringX.target.value = clampedTarget.x
       vp.centerSpringY.target.value = clampedTarget.y
 
-      const clampedCurrent = clampCenterForZoom(
-        vp.zoomSpring.current.value,
-        vp.centerSpringX.current.value,
-        vp.centerSpringY.current.value
-      )
-      vp.centerSpringX.current.value = clampedCurrent.x
-      vp.centerSpringY.current.value = clampedCurrent.y
+      // Only clamp current center if it actually crosses the outer CTX boundary
+      const curX = vp.centerSpringX.current.value
+      const curY = vp.centerSpringY.current.value
+      const clampedCurrent = clampCenterForZoom(vp.zoomSpring.current.value, curX, curY)
+      if (Math.abs(clampedCurrent.x - curX) > 1e-6) {
+        vp.centerSpringX.current.value = clampedCurrent.x
+      }
+      if (Math.abs(clampedCurrent.y - curY) > 1e-6) {
+        vp.centerSpringY.current.value = clampedCurrent.y
+      }
     }
 
     // Synchronously project all vectors and pins in the exact same paint frame as OpenSeadragon
@@ -700,36 +747,59 @@ export default function RouteMap({
         hazardImgRef.current.style.height = `${height.toFixed(1)}px`
       }
 
-      // 3. Update context pins synchronously
-      for (let i = 0; i < items.contextPins.length; i++) {
-        const c = items.contextPins[i]
-        const el = ctxPinRefs.current.get(c.id)
-        if (el) {
-          const x = toPxX(c.wx).toFixed(1)
-          const y = toPxY(c.wy).toFixed(1)
-          el.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`
-        }
-      }
+      // 3 & 4. Position route markers and context pins centered strictly on their dots,
+      // and apply zoom-adaptive + collision-free label visibility so labels never overlap or hide the route
+      const placedBoxes = []
+      const markerEntries = []
 
-      // 4. Update route markers synchronously
-      const showAllLabels = mPerPx <= 2.5
       for (let i = 0; i < items.markers.length; i++) {
         const m = items.markers[i]
         const el = markerRefs.current.get(m.id)
-        if (el) {
-          const x = toPxX(m.wx).toFixed(1)
-          const y = toPxY(m.wy).toFixed(1)
-          el.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`
-          const shouldShowLabel = m.alwaysBase || (m.showOnZoom && showAllLabels)
-          if (shouldShowLabel) {
-            el.classList.add('is-always')
-          } else {
-            el.classList.remove('is-always')
+        if (!el) continue
+        const x = toPxX(m.wx)
+        const y = toPxY(m.wy)
+        el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0) translate(-50%, -50%)`
+        // Reserve the circular dot box itself so subsequent labels don't cover route dots
+        placedBoxes.push({
+          left: x - 11,
+          right: x + 11,
+          top: y - 11,
+          bottom: y + 11,
+        })
+        markerEntries.push({ m, el, x, y })
+      }
+
+      // Sort route markers by priority (1: Start/End -> 2: Custom Detour -> 3: Stop/Shelter -> 4: Waypoint)
+      markerEntries.sort((a, b) => (a.m.priority || 9) - (b.m.priority || 9))
+
+      const tryPlaceLabelBox = (x, y, text, dotRadius = 14) => {
+        const w = Math.min(165, (text?.length || 6) * 6.2 + 14)
+        const left = x + dotRadius
+        const right = left + w
+        const top = y - 10
+        const bottom = y + 10
+        for (let j = 0; j < placedBoxes.length; j++) {
+          const b = placedBoxes[j]
+          if (!(right < b.left || left > b.right || bottom < b.top || top > b.bottom)) {
+            return false
           }
+        }
+        placedBoxes.push({ left, right, top, bottom })
+        return true
+      }
+
+      for (let i = 0; i < markerEntries.length; i++) {
+        const { m, el, x, y } = markerEntries[i]
+        const withinZoom = mPerPx <= (m.maxMPerPx ?? 0)
+        const canShow = withinZoom && tryPlaceLabelBox(x, y, m.label, 14)
+        if (canShow) {
+          el.classList.add('is-always')
+        } else {
+          el.classList.remove('is-always')
         }
       }
 
-      // 5. Update playhead synchronously
+      // 4. Update playhead synchronously
       const pw = playheadWorldRef.current
       if (playheadRef.current && pw) {
         const x = toPxX(pw.wx).toFixed(1)
@@ -741,21 +811,23 @@ export default function RouteMap({
     syncOverlayRef.current = syncOverlay
 
     viewer.addHandler('open', () => {
-      const targetRect = route
-        ? computeRouteWorldRect(route, focus)
-        : bboxToWorldRect(activeSector.bbox)
+      const curRoute = routeRef.current
+      const curSec = activeSectorRef.current || activeSector
+      const targetRect = curRoute
+        ? computeRouteWorldRect(curRoute, focusRef.current, curSec)
+        : bboxToWorldRect(curSec.bbox)
       viewer.viewport.fitBounds(targetRect, true)
       syncOverlay()
     })
     viewer.addHandler('canvas-click', (event) => {
-      if (!addWaypointModeRef.current || !event.quick || !viewer.viewport) return
+      if (!mapPickModeRef.current || !event.quick || !viewer.viewport) return
       const vpPoint = viewer.viewport.pointFromPixel(event.position)
       const sec = activeSectorRef.current || EVA_SECTORS.gale
       const rawLat = worldYToLat(vpPoint.y)
       const rawLon = ((worldXToLon(vpPoint.x) % 360) + 360) % 360
       const clampedLat = Math.max(sec.bbox.south + 0.02, Math.min(sec.bbox.north - 0.02, rawLat))
       const clampedLon = Math.max(sec.bbox.west + 0.02, Math.min(sec.bbox.east - 0.02, rawLon))
-      onMapAddWaypointRef.current?.({ lat: clampedLat, lon: clampedLon })
+      onMapPickPointRef.current?.({ lat: clampedLat, lon: clampedLon })
     })
     viewer.addHandler('animation-start', syncOverlay)
     viewer.addHandler('animation', syncOverlay)
@@ -787,6 +859,19 @@ export default function RouteMap({
         ? viewer.viewport.getBounds(true)
         : null
     viewer._lastSectorId = activeSector.id
+
+    // Synchronously update sector clamp refs and position viewport before adding new tiles
+    activeSectorRef.current = activeSector
+    sectorRectRef.current = bboxToWorldRect(activeSector.bbox)
+    clampRectRef.current = bboxToWorldRect(activeSector.ctxBbox)
+
+    if (!sameSector && viewer.viewport) {
+      lastFitKeyRef.current = ''
+      const initialRect = routeRef.current
+        ? computeRouteWorldRect(routeRef.current, focusRef.current, activeSector)
+        : bboxToWorldRect(activeSector.bbox)
+      viewer.viewport.fitBounds(initialRect, true)
+    }
 
     viewer.world.removeAll()
 
@@ -822,10 +907,14 @@ export default function RouteMap({
         if (prevBounds) {
           viewer.viewport.fitBounds(prevBounds, true)
         } else {
-          const targetRect = route
-            ? computeRouteWorldRect(route, focus)
+          const latestRoute = routeRef.current
+          const targetRect = latestRoute
+            ? computeRouteWorldRect(latestRoute, focusRef.current, activeSector)
             : bboxToWorldRect(activeSector.bbox)
           viewer.viewport.fitBounds(targetRect, true)
+          if (latestRoute) {
+            lastFitKeyRef.current = `${latestRoute.start?.id}:${latestRoute.end?.id}:${latestRoute.mode}:${latestRoute.distanceKm}:${focusRef.current ? 1 : 0}:${activeSector.id}`
+          }
         }
         syncOverlayRef.current?.()
         addOverlayAt(0)
@@ -845,11 +934,11 @@ export default function RouteMap({
 
   useEffect(() => {
     const viewer = viewerRef.current
-    if (!viewer || !viewer.viewport || viewer.world.getItemCount() === 0) return
+    if (!viewer || !viewer.viewport) return
     if (lastFitKeyRef.current === routeFitKey) return
     lastFitKeyRef.current = routeFitKey
     if (route) {
-      const rect = computeRouteWorldRect(route, focus)
+      const rect = computeRouteWorldRect(route, focus, activeSector)
       viewer.viewport.fitBounds(rect, false)
       syncOverlayRef.current?.()
     }
@@ -875,32 +964,42 @@ export default function RouteMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePoint])
 
-  const handleZoom = (factor) => {
+  const handleZoom = (factor, e) => {
+    e?.currentTarget?.blur()
     const viewer = viewerRef.current
     const vp = viewer?.viewport
-    const sRect = sectorRectRef.current
-    if (!vp || !sRect) return
+    const cRect = clampRectRef.current || sectorRectRef.current
+    if (!vp || !cRect) return
     const aspect = Math.max(0.25, vp.getAspectRatio())
-    const minZ = Math.max(1 / sRect.width, 1 / (sRect.height * aspect))
-    const maxZ = 28000
+    const minZ = Math.max(1 / cRect.width, 1 / (cRect.height * aspect))
+    const maxZ = MAX_ALLOWED_ZOOM
     const nextZ = Math.max(minZ, Math.min(maxZ, vp.zoomSpring.target.value * factor))
     vp.zoomTo(nextZ, null, false)
     syncOverlayRef.current?.()
   }
 
-  const handleFitRoute = () => {
+  const handleFitRoute = (e) => {
+    e?.currentTarget?.blur()
     const viewer = viewerRef.current
     if (!viewer?.viewport) return
-    const rect = computeRouteWorldRect(route, focus)
+    const rect = route?.path?.length
+      ? computeRouteWorldRect(route, focus, activeSector)
+      : bboxToWorldRect(activeSector.bbox)
     viewer.viewport.fitBounds(rect, false)
     syncOverlayRef.current?.()
   }
 
-  const handleFitSector = () => {
+  const handleFitSector = (e) => {
+    e?.currentTarget?.blur()
     const viewer = viewerRef.current
     if (!viewer?.viewport) return
     viewer.viewport.fitBounds(bboxToWorldRect(activeSector.bbox), false)
     syncOverlayRef.current?.()
+  }
+
+  const handleExitPicker = (e) => {
+    e?.currentTarget?.blur()
+    onExitPickMode?.()
   }
 
   const handleMouseMove = (e) => {
@@ -920,11 +1019,20 @@ export default function RouteMap({
     }
   }
 
+  const pickerBannerText =
+    mapPickMode === 'start'
+      ? 'Tap map to set Start'
+      : mapPickMode === 'dest'
+      ? 'Tap map to set Destination'
+      : mapPickMode === 'detour'
+      ? `Tap map to add stops (${customWaypoints.length}/4)`
+      : ''
+
   return (
     <div
       ref={containerRef}
       className={`rm-map rm-osd-map${focus ? ' rm-map--focus' : ''}${
-        addWaypointMode ? ' is-adding-wp' : ''
+        mapPickMode ? ' is-adding-wp' : ''
       }`}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
@@ -932,12 +1040,12 @@ export default function RouteMap({
       {/* OpenSeadragon 2D Deep-Zoom Canvas */}
       <div ref={osdRef} className="rm-osd-canvas" />
 
-      {addWaypointMode && (
+      {mapPickMode && (
         <div className="rm-map-addwp-banner">
-          <MapPin size={13} className="text-sky-400" />
-          <span>Click anywhere on crater map to insert a detour waypoint</span>
-          <button type="button" onClick={onToggleAddWaypointMode}>
-            Done
+          <MapPin size={13} className="text-red-400 shrink-0" />
+          <span>{pickerBannerText}</span>
+          <button type="button" onClick={handleExitPicker}>
+            {mapPickMode === 'detour' ? 'Done' : 'Cancel'}
           </button>
         </div>
       )}
@@ -959,22 +1067,6 @@ export default function RouteMap({
           <polyline ref={svgLineRef} points="" className="rm-osd-route-line" />
         </svg>
 
-        {overlayItems.contextPins.map((c) => (
-          <div
-            key={'ctx-' + c.id}
-            ref={(el) => {
-              if (el) ctxPinRefs.current.set(c.id, el)
-              else ctxPinRefs.current.delete(c.id)
-            }}
-            className="rm-osd-ctxpin"
-            style={{ left: 0, top: 0 }}
-            title={`${c.name} (${fmtCoord(c.lat, c.lon)})`}
-          >
-            <span className="rm-osd-ctxpin__dot" style={{ background: c.color }} />
-            <span className="rm-osd-ctxpin__label">{c.name}</span>
-          </div>
-        ))}
-
         {overlayItems.markers.map((m) => (
           <button
             key={m.id}
@@ -983,13 +1075,14 @@ export default function RouteMap({
               else markerRefs.current.delete(m.id)
             }}
             type="button"
-            className={`rm-osd-marker rm-osd-marker--${m.kind}${m.alwaysBase ? ' is-always' : ''}`}
+            className={`rm-osd-marker rm-osd-marker--${m.kind}`}
             style={{ left: 0, top: 0 }}
             onClick={(e) => {
               e.stopPropagation()
+              e.currentTarget.blur()
               onSelectPoint?.(m.id)
             }}
-            title={`${m.label} — Click to centre map & view surface panorama`}
+            title={`${m.tooltip || m.label} — Click to centre map & view surface panorama`}
           >
             <span className="rm-osd-marker__dot" style={{ background: m.color }}>
               {m.badge || ''}
@@ -1009,34 +1102,40 @@ export default function RouteMap({
         </div>
       </div>
 
-      {/* Map Navigation Controls */}
+      {/* Map Navigation Controls (+, -, Crosshair, Reposition) — active on press only */}
       <div className="rm-ctrls">
-        <button type="button" onClick={() => handleZoom(1.85)} title="Zoom in">
+        <button
+          type="button"
+          onClick={(e) => handleZoom(1.85, e)}
+          aria-label="Zoom in"
+          title="Zoom in"
+        >
           <Plus size={18} />
         </button>
-        <button type="button" onClick={() => handleZoom(1 / 1.85)} title="Zoom out">
+        <button
+          type="button"
+          onClick={(e) => handleZoom(1 / 1.85, e)}
+          aria-label="Zoom out"
+          title="Zoom out"
+        >
           <Minus size={18} />
         </button>
-        <button type="button" onClick={handleFitRoute} title="Fit active route">
+        <button
+          type="button"
+          onClick={handleFitRoute}
+          aria-label="Fit active route"
+          title="Center and fit active route"
+        >
           <Crosshair size={18} />
         </button>
-        <button type="button" onClick={handleFitSector} title="Reset sector view">
+        <button
+          type="button"
+          onClick={handleFitSector}
+          aria-label="Reposition sector view"
+          title={`Reposition to ${activeSector.label} sector overview`}
+        >
           <RotateCcw size={18} />
         </button>
-        {onToggleAddWaypointMode && (
-          <button
-            type="button"
-            onClick={onToggleAddWaypointMode}
-            className={addWaypointMode ? 'is-active-tool' : ''}
-            title={
-              addWaypointMode
-                ? 'Exit detour waypoint mode'
-                : 'Click map to insert custom detour waypoint'
-            }
-          >
-            <MapPin size={17} />
-          </button>
-        )}
       </div>
 
       {/* Bottom-right distance metric scale & coordinate readout (matches ExplorePage) */}

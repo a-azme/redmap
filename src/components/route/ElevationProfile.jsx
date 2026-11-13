@@ -334,7 +334,7 @@ export default function ElevationProfile({
           </span>
         ) : (
           <span className="rm-muted">
-            Hover or click profile for live Point-of-No-Return (PNR), Remaining Suit O₂, and Shelter ETA (★ = science, blue dot = shelter)
+            Scrub profile for live PNR status, suit O₂/battery, and shelter ETA (★ = science, blue dot = shelter)
           </span>
         )}
       </div>

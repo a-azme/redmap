@@ -12,8 +12,9 @@ import {
 
 window.CESIUM_BASE_URL = '/cesium/'
 
-const MIN_ZOOM_METERS = 500 // 500 m (0.5 km) hyperlocal zoom over HiRISE 25 cm mosaics
+const MIN_ZOOM_METERS = 500 // 500 m (0.5 km) hyperlocal zoom
 const MAX_ZOOM_METERS = 330_000_000 // 330,000 km
+const MAX_2D_HALF_HEIGHT_M = Math.PI * 0.5 * MARS.maximumRadius // ~5,334,722.7 m (90°N / 90°S in GeographicProjection)
 const ORBIT_HEIGHT = 8_000_000 // 8,000 km initial height (mobile baseline)
 const ABBREV_START_KM = 7000
 const HIDE_ALL_ALT_KM = 24000
@@ -140,11 +141,38 @@ function getSharedGlobe() {
 
   // Light camera er sathe sathe thake (upor-bam theke ashche), tai globe ghurleo
   // terminator (alo-chhaya shimana) shobshomoy dekha jay.
+  // In 2D mode, strictly clamp vertical frustum height and vertical camera position (y)
+  // so dragging up/down or zooming out never crosses ±90° latitude or reveals background.
   const lightDir = new Cesium.Cartesian3()
   const lightTmp = new Cesium.Cartesian3()
   scene.preRender.addEventListener(() => {
-    if (viewer.isDestroyed() || scene.mode !== Cesium.SceneMode.SCENE3D) return
+    if (viewer.isDestroyed()) return
     const cam = viewer.camera
+    if (scene.mode === Cesium.SceneMode.SCENE2D) {
+      const maxY = cam._maxCoord?.y || MAX_2D_HALF_HEIGHT_M
+      let f = cam.frustum
+      if (f?.offCenterFrustum) f = f.offCenterFrustum
+      if (f && typeof f.top === 'number' && typeof f.right === 'number' && f.top > 0) {
+        const aspect = f.right / f.top
+        if (f.top > maxY) {
+          f.top = maxY
+          f.bottom = -maxY
+          f.right = maxY * aspect
+          f.left = -f.right
+        }
+        const maxCenterY = Math.max(0, maxY - f.top)
+        const ctrl2d = scene.screenSpaceCameraController
+        if (cam.position.y > maxCenterY) {
+          cam.position.y = maxCenterY
+          if (ctrl2d) ctrl2d._lastInertiaTranslateMovement = undefined
+        } else if (cam.position.y < -maxCenterY) {
+          cam.position.y = -maxCenterY
+          if (ctrl2d) ctrl2d._lastInertiaTranslateMovement = undefined
+        }
+      }
+      return
+    }
+    if (scene.mode !== Cesium.SceneMode.SCENE3D) return
     Cesium.Cartesian3.multiplyByScalar(cam.rightWC, 0.8, lightTmp)
     Cesium.Cartesian3.add(cam.directionWC, lightTmp, lightDir)
     Cesium.Cartesian3.multiplyByScalar(cam.upWC, -0.35, lightTmp)
@@ -175,6 +203,7 @@ function getSharedGlobe() {
     viewer,
     initialSized: false,
     globeDrawn: false,
+    userStoppedSpin: false,
     appliedKey: null,
     disposeLayer: null,
     status: 'loading',
@@ -195,14 +224,31 @@ function getSharedGlobe() {
     }
   })
 
+  let readyStableFrames = 0
   const checkGlobeDrawn = () => {
-    if (state.globeDrawn || viewer.isDestroyed()) return
-    const renderedTiles = scene.globe?._surface?._tilesToRender?.length || 0
-    if (renderedTiles > 0 && viewer.imageryLayers.length > 0) {
-      state.globeDrawn = true
-      scene.postRender.removeEventListener(checkGlobeDrawn)
+    if (viewer.isDestroyed()) return
+    // Keep camera.flyTo tweens animating smoothly when scene.requestRenderMode = true
+    if (scene.tweens && scene.tweens.length > 0) {
       scene.requestRender()
-      window.dispatchEvent(new Event('rm:ready'))
+    }
+    if (state.globeDrawn) return
+    const renderedTiles = scene.globe?._surface?._tilesToRender?.length || 0
+    const tilesLoaded = Boolean(scene.globe?.tilesLoaded)
+    if (renderedTiles > 0 && viewer.imageryLayers.length > 0 && tilesLoaded) {
+      readyStableFrames += 1
+      if (readyStableFrames >= 2) {
+        state.globeDrawn = true
+        window.__rmGlobeReady = true
+        if (!state.userStoppedSpin && scene.mode === Cesium.SceneMode.SCENE3D) {
+          state.startSpin?.()
+        }
+        scene.requestRender()
+        window.dispatchEvent(new Event('rm:ready'))
+      } else {
+        scene.requestRender()
+      }
+    } else {
+      readyStableFrames = 0
     }
   }
   scene.postRender.addEventListener(checkGlobeDrawn)
@@ -222,13 +268,15 @@ function getSharedGlobe() {
   }
 
   state.startSpin = () => {
+    state.userStoppedSpin = false
     if (state.spinning && spinRaf) return
     state.spinning = true
     lastSpinTime = 0
     spinRaf = requestAnimationFrame(spinStep)
   }
 
-  state.stopSpin = () => {
+  state.stopSpin = (byUser = true) => {
+    if (byUser) state.userStoppedSpin = true
     state.spinning = false
     if (spinRaf) {
       cancelAnimationFrame(spinRaf)
@@ -407,9 +455,6 @@ export default function MarsGlobe({
   const [status, setStatus] = useState(() =>
     sharedGlobe && sharedGlobe.appliedKey === key ? sharedGlobe.status : 'loading'
   )
-  const [used, setUsed] = useState(() =>
-    sharedGlobe && sharedGlobe.appliedKey === key ? sharedGlobe.used : ''
-  )
   const [cardVisible, setCardVisible] = useState(true)
 
   useEffect(() => {
@@ -461,6 +506,12 @@ export default function MarsGlobe({
     viewerRef.current = shared.viewer
     if (!shared.viewer.isDestroyed()) {
       shared.viewer.useDefaultRenderLoop = true
+      if (
+        shared.viewer.scene.mode === Cesium.SceneMode.SCENE3D &&
+        !shared.userStoppedSpin
+      ) {
+        shared.startSpin?.()
+      }
     }
     if (host.clientWidth > 0 && host.clientHeight > 0) {
       shared.viewer.resize()
@@ -489,7 +540,7 @@ export default function MarsGlobe({
 
     return () => {
       ro.disconnect()
-      shared.stopSpin?.()
+      shared.stopSpin?.(false)
       if (!shared.viewer.isDestroyed()) {
         shared.viewer.useDefaultRenderLoop = false
       }
@@ -510,7 +561,13 @@ export default function MarsGlobe({
     const want = mode === '2D' ? Cesium.SceneMode.SCENE2D : Cesium.SceneMode.SCENE3D
     if (scene.mode === want) return
 
-    shared.stopSpin()
+    const prevCarto = viewer.camera.positionCartographic
+    const curLon = prevCarto ? Cesium.Math.toDegrees(prevCarto.longitude) : focus?.lon ?? 77
+    const curLat = prevCarto
+      ? Math.max(-28, Math.min(28, Cesium.Math.toDegrees(prevCarto.latitude)))
+      : focus?.lat ?? 18
+
+    shared.stopSpin(false)
     viewer.camera.cancelFlight()
 
     if (mode === '2D') {
@@ -520,14 +577,10 @@ export default function MarsGlobe({
       scene.morphTo2D(1.0)
       scene.completeMorph()
       ctrl.minimumZoomDistance = MIN_ZOOM_METERS
-      ctrl.maximumZoomDistance = MAX_ZOOM_METERS
-      const targetRect = get2DFillRect(viewer, focus?.lon ?? 77)
+      ctrl.maximumZoomDistance = MAX_2D_HALF_HEIGHT_M * 2
+      const targetRect = get2DFillRect(viewer, focus?.lon ?? curLon)
       viewer.camera.setView({
-        destination: Cesium.Rectangle.fromDegrees(-180, -82, 180, 82),
-      })
-      viewer.camera.flyTo({
         destination: targetRect,
-        duration: 0.65,
       })
     } else {
       scene.backgroundColor = Cesium.Color.TRANSPARENT
@@ -536,14 +589,12 @@ export default function MarsGlobe({
       scene.completeMorph()
       ctrl.minimumZoomDistance = MIN_ZOOM_METERS
       ctrl.maximumZoomDistance = MAX_ZOOM_METERS
-      const lon = focus?.lon ?? 77
-      const lat = focus?.lat ?? 18
       const orbitH = getOrbitHeight(viewer)
       viewer.camera.setView({
-        destination: at(lon, lat, orbitH * 1.25),
+        destination: at(curLon, curLat, orbitH * 1.18),
       })
       viewer.camera.flyTo({
-        destination: at(lon, lat, orbitH),
+        destination: at(curLon, curLat, orbitH),
         duration: 0.65,
         complete: () => sharedGlobe?.startSpin(),
       })
@@ -558,17 +609,15 @@ export default function MarsGlobe({
     if (!viewer || viewer.isDestroyed()) return
 
     let unmounted = false
-    shared.onLayerState = (nextStatus, nextUsed) => {
+    shared.onLayerState = (nextStatus) => {
       if (unmounted) return
       if (nextStatus !== undefined) setStatus(nextStatus)
-      if (nextUsed !== undefined) setUsed(nextUsed)
     }
 
     if (shared.appliedKey === key && viewer.imageryLayers.length > 0) {
       Promise.resolve().then(() => {
         if (!unmounted) {
           setStatus(shared.status)
-          setUsed(shared.used)
         }
       })
       viewer.scene.requestRender()
@@ -589,7 +638,6 @@ export default function MarsGlobe({
     Promise.resolve().then(() => {
       if (!unmounted) {
         setStatus('loading')
-        setUsed('')
       }
     })
 
@@ -598,8 +646,9 @@ export default function MarsGlobe({
       onStatus: (s) => {
         if (!cancelled) {
           shared.status = s
-          shared.onLayerState?.(s, undefined)
+          shared.onLayerState?.(s)
           if (s === 'error' || (s === 'ok' && shared.globeDrawn)) {
+            window.__rmGlobeReady = true
             window.dispatchEvent(new Event('rm:ready'))
           }
         }
@@ -607,7 +656,6 @@ export default function MarsGlobe({
       onSource: (n) => {
         if (!cancelled) {
           shared.used = n
-          shared.onLayerState?.(undefined, n)
         }
       },
     })
@@ -740,6 +788,8 @@ export default function MarsGlobe({
     })
 
     let lastReportedAlt = -1
+    let lastReportedLat = 999
+    let lastReportedLon = 999
     const occluder = new Cesium.EllipsoidalOccluder(MARS, viewer.camera.positionWC)
     const scratchWin = new Cesium.Cartesian2()
     const placedBoxes = []
@@ -752,36 +802,64 @@ export default function MarsGlobe({
       const is3D = sceneMode === Cesium.SceneMode.SCENE3D
       const camHeight = getCameraZoomHeight(viewer)
       const altKm = camHeight / 1000
+      const carto = viewer.camera.positionCartographic
+      const cLat = carto ? Cesium.Math.toDegrees(carto.latitude) : 0
+      const cLon = carto ? Cesium.Math.toDegrees(carto.longitude) : 77
 
-      if (onCameraChangeRef.current && Math.abs(altKm - lastReportedAlt) >= 15) {
+      const isAutoSpinning = Boolean(sharedGlobe?.spinning)
+      if (
+        onCameraChangeRef.current &&
+        (Math.abs(altKm - lastReportedAlt) >= 15 ||
+          (!isAutoSpinning &&
+            (Math.abs(cLat - lastReportedLat) >= 0.15 ||
+              Math.abs(cLon - lastReportedLon) >= 0.15)))
+      ) {
         lastReportedAlt = altKm
+        if (!isAutoSpinning) {
+          lastReportedLat = cLat
+          lastReportedLon = cLon
+        }
         const activeLevel = altKm > 3200 ? 1 : altKm > 1100 ? 2 : 3
-        onCameraChangeRef.current(Math.round(altKm), activeLevel)
+        onCameraChangeRef.current(
+          Math.round(altKm),
+          activeLevel,
+          isAutoSpinning ? undefined : cLat,
+          isAutoSpinning ? undefined : cLon
+        )
       }
 
       if (compassDialRef.current) {
         const cam = viewer.camera
-        const rx = cam.rightWC.z
-        const ry = cam.upWC.z
-        const angleRad =
-          rx * rx + ry * ry > 1e-6 ? Math.atan2(rx, ry) : -(cam.heading || 0)
+        let angleRad = -(cam.heading || 0)
+        if (is3D) {
+          const carto = cam.positionCartographic
+          if (carto) {
+            const sinLat = Math.sin(carto.latitude)
+            const cosLat = Math.cos(carto.latitude)
+            const sinLon = Math.sin(carto.longitude)
+            const cosLon = Math.cos(carto.longitude)
+            // Local North unit tangent vector on ellipsoid at camera sub-point
+            const nx = -sinLat * cosLon
+            const ny = -sinLat * sinLon
+            const nz = cosLat
+            const r = cam.rightWC
+            const u = cam.upWC
+            const projRight = r.x * nx + r.y * ny + r.z * nz
+            const projUp = u.x * nx + u.y * ny + u.z * nz
+            if (projRight * projRight + projUp * projUp > 1e-6) {
+              angleRad = Math.atan2(projRight, projUp)
+            }
+          }
+        }
         const angleDeg = Cesium.Math.toDegrees(angleRad)
         compassDialRef.current.style.transform = `rotate(${angleDeg.toFixed(2)}deg)`
       }
 
       let dirty = false
 
-      const renderedTiles = viewer.scene.globe?._surface?._tilesToRender?.length || 0
-      const isGlobeSurfaceReady =
-        Boolean(sharedGlobe?.globeDrawn) ||
-        (renderedTiles > 0 && viewer.imageryLayers.length > 0)
+      const isGlobeSurfaceReady = Boolean(sharedGlobe?.globeDrawn)
 
-      if (isGlobeSurfaceReady && sharedGlobe && !sharedGlobe.globeDrawn) {
-        sharedGlobe.globeDrawn = true
-        window.dispatchEvent(new Event('rm:ready'))
-      }
-
-      // Wait until the globe quadtree has rendered its surface before showing location markers,
+      // Wait until the globe surface and its imagery textures are drawn before showing location markers,
       // and hide all points/labels when altitude >= 24,000 km
       if (!isGlobeSurfaceReady || altKm >= HIDE_ALL_ALT_KM) {
         for (let i = 0; i < tracked.length; i++) {
@@ -948,14 +1026,16 @@ export default function MarsGlobe({
     const viewer = viewerRef.current || sharedGlobe?.viewer
     const cam = viewer?.camera
     if (!cam) return
+    const is2D = viewer.scene.mode === Cesium.SceneMode.SCENE2D
+    const maxZoomLim = is2D ? MAX_2D_HALF_HEIGHT_M * 2 : MAX_ZOOM_METERS
     const h = getCameraZoomHeight(viewer)
     if (dir > 0) {
       if (h <= MIN_ZOOM_METERS) return
       const step = Math.min(h * 0.45, h - MIN_ZOOM_METERS)
       if (step > 0) cam.zoomIn(step)
     } else {
-      if (h >= MAX_ZOOM_METERS) return
-      const step = Math.min(h * 0.6, MAX_ZOOM_METERS - h)
+      if (h >= maxZoomLim) return
+      const step = Math.min(h * 0.6, maxZoomLim - h)
       if (step > 0) cam.zoomOut(step)
     }
     viewer.scene.requestRender()
@@ -963,32 +1043,116 @@ export default function MarsGlobe({
 
   const handleCenter = () => {
     sharedGlobe?.stopSpin()
-    if (onCenter) {
-      onCenter()
-    } else if (focus) {
-      const viewer = viewerRef.current || sharedGlobe?.viewer
+    const handled = onCenter ? onCenter() : false
+    if (handled) return
+    const viewer = viewerRef.current || sharedGlobe?.viewer
+    if (!viewer || viewer.isDestroyed()) return
+    if (focus) {
       const targetHeight = getIdealFlyHeightMeters(focus)
-      viewer?.camera.flyTo({ destination: at(focus.lon, focus.lat, targetHeight), duration: 1.6 })
-      viewer?.scene.requestRender()
+      viewer.camera.flyTo({
+        destination: at(focus.lon, focus.lat, targetHeight),
+        orientation: {
+          heading: 0,
+          pitch: -Cesium.Math.PI_OVER_TWO,
+          roll: 0,
+        },
+        duration: 1.4,
+      })
+    } else {
+      const carto = viewer.camera.positionCartographic
+      const curLon = carto ? Cesium.Math.toDegrees(carto.longitude) : 0
+      const curLat = carto
+        ? Math.max(-60, Math.min(60, Cesium.Math.toDegrees(carto.latitude)))
+        : 0
+      const curH = getCameraZoomHeight(viewer)
+      viewer.camera.flyTo({
+        destination: at(curLon, curLat, curH),
+        orientation: {
+          heading: 0,
+          pitch: -Cesium.Math.PI_OVER_TWO,
+          roll: 0,
+        },
+        duration: 0.65,
+      })
     }
+    viewer.scene.requestRender()
   }
 
   const handleReset = () => {
     const viewer = viewerRef.current || sharedGlobe?.viewer
-    if (!viewer) return
-    sharedGlobe?.stopSpin()
+    if (!viewer || viewer.isDestroyed()) return
+    viewer.camera.cancelFlight()
     onReset?.()
+
+    // Pick the longitude currently in view so we never rewind back to 18.41°N, 77.69°E
+    const cam = viewer.camera
+    const canvas = viewer.scene.canvas
+    const centerPx = new Cesium.Cartesian2(
+      (canvas?.clientWidth || 800) * 0.5,
+      (canvas?.clientHeight || 600) * 0.5
+    )
+    const picked =
+      viewer.scene.mode === Cesium.SceneMode.SCENE3D
+        ? cam.pickEllipsoid(centerPx, MARS)
+        : null
+    const centerCarto = picked ? MARS.cartesianToCartographic(picked) : null
+    const carto = cam.positionCartographic
+    const curLon = centerCarto
+      ? Cesium.Math.toDegrees(centerCarto.longitude)
+      : carto
+      ? Cesium.Math.toDegrees(carto.longitude)
+      : 0
+    const curLat = carto ? Cesium.Math.toDegrees(carto.latitude) : 0
+
     if (viewer.scene.mode === Cesium.SceneMode.SCENE2D) {
-      viewer.camera.flyTo({
-        destination: get2DFillRect(viewer, 77),
-        duration: 1.2,
+      sharedGlobe?.stopSpin()
+      cam.flyTo({
+        destination: get2DFillRect(viewer, curLon),
+        orientation: {
+          heading: 0,
+          pitch: -Cesium.Math.PI_OVER_TWO,
+          roll: 0,
+        },
+        duration: 0.75,
       })
     } else {
-      viewer.camera.flyTo({
-        destination: at(77, 18, getOrbitHeight(viewer)),
-        duration: 1.6,
-        complete: () => sharedGlobe?.startSpin(),
-      })
+      const orbitH = getOrbitHeight(viewer)
+      const curH = carto?.height ?? orbitH
+      const latDiff = Math.abs(curLat)
+      const heightDiffRatio = Math.abs(curH - orbitH) / orbitH
+      const rawHeading =
+        (((cam.heading || 0) % Cesium.Math.TWO_PI) + Cesium.Math.TWO_PI) %
+        Cesium.Math.TWO_PI
+      const headingDiff = Math.min(rawHeading, Cesium.Math.TWO_PI - rawHeading)
+      const pitchDiff = Math.abs((cam.pitch || 0) + Cesium.Math.PI_OVER_TWO)
+      const rawRoll =
+        (((cam.roll || 0) % Cesium.Math.TWO_PI) + Cesium.Math.TWO_PI) %
+        Cesium.Math.TWO_PI
+      const rollDiff = Math.min(rawRoll, Cesium.Math.TWO_PI - rawRoll)
+
+      // If already upright (North up, equatorial level, standard orbit zoom), spin immediately;
+      // otherwise straighten direction/tilt/zoom right at the current longitude and then spin.
+      if (
+        latDiff <= 1.5 &&
+        heightDiffRatio <= 0.04 &&
+        headingDiff <= 0.03 &&
+        pitchDiff <= 0.03 &&
+        rollDiff <= 0.03
+      ) {
+        sharedGlobe?.startSpin()
+      } else {
+        sharedGlobe?.stopSpin(false)
+        cam.flyTo({
+          destination: at(curLon, 0, orbitH),
+          orientation: {
+            heading: 0,
+            pitch: -Cesium.Math.PI_OVER_TWO,
+            roll: 0,
+          },
+          duration: 0.75,
+          complete: () => sharedGlobe?.startSpin(),
+        })
+      }
     }
     viewer.scene.requestRender()
   }
@@ -998,6 +1162,7 @@ export default function MarsGlobe({
     if (!viewer || viewer.isDestroyed()) return
     sharedGlobe?.stopSpin()
     const cam = viewer.camera
+    cam.cancelFlight()
     if (viewer.scene.mode === Cesium.SceneMode.SCENE2D) {
       cam.flyTo({
         destination: cam.positionWC,
@@ -1006,13 +1171,21 @@ export default function MarsGlobe({
           pitch: cam.pitch,
           roll: 0,
         },
-        duration: 0.55,
+        duration: 0.5,
       })
     } else {
-      const carto = cam.positionCartographic
-      const lon = Cesium.Math.toDegrees(carto.longitude)
-      const lat = Cesium.Math.toDegrees(carto.latitude)
-      const height = carto.height
+      const canvas = viewer.scene.canvas
+      const centerPx = new Cesium.Cartesian2(
+        (canvas?.clientWidth || 800) * 0.5,
+        (canvas?.clientHeight || 600) * 0.5
+      )
+      const picked = cam.pickEllipsoid(centerPx, MARS)
+      const centerCarto = picked
+        ? MARS.cartesianToCartographic(picked)
+        : cam.positionCartographic
+      const height = cam.positionCartographic?.height ?? getOrbitHeight(viewer)
+      const lon = Cesium.Math.toDegrees(centerCarto.longitude)
+      const lat = Cesium.Math.toDegrees(centerCarto.latitude)
       cam.flyTo({
         destination: Cesium.Cartesian3.fromDegrees(lon, lat, height, MARS),
         orientation: {
@@ -1020,7 +1193,7 @@ export default function MarsGlobe({
           pitch: -Cesium.Math.PI_OVER_TWO,
           roll: 0,
         },
-        duration: 0.55,
+        duration: 0.5,
       })
     }
     viewer.scene.requestRender()
@@ -1033,7 +1206,7 @@ export default function MarsGlobe({
   }[status]
 
   const btn =
-    'flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-black/60 backdrop-blur-md hover:bg-white/10'
+    'grid h-[38px] w-[38px] place-items-center rounded-[10px] border border-white/12 bg-[#0c0e14]/85 text-[#e2e4ea] backdrop-blur-md transition [@media(hover:hover)]:hover:border-[#ff6b57]/45 [@media(hover:hover)]:hover:bg-[#1c202c]/92 [@media(hover:hover)]:hover:text-white active:scale-95 active:border-[#ff6b57] active:bg-[#e23b2e]/85 active:text-white'
 
   return (
     <div
@@ -1050,29 +1223,64 @@ export default function MarsGlobe({
       />
 
       {/* Zoom in, Zoom out, Center on location, Reset buttons on the right top side */}
-      <div className={`absolute z-20 flex flex-col gap-2 ${controlsClassName || 'right-3 top-3 sm:right-4 sm:top-4'}`}>
-        <button className={btn} onClick={() => zoom(1)} title="Zoom in" aria-label="Zoom in">
+      <div className={`absolute z-20 flex flex-col gap-[7px] ${controlsClassName || 'right-2.5 top-2.5 lg:right-4 lg:top-4'}`}>
+        <button
+          className={btn}
+          onClick={(e) => {
+            e.currentTarget.blur()
+            zoom(1)
+          }}
+          title="Zoom in"
+          aria-label="Zoom in"
+        >
           <Plus size={18} />
         </button>
-        <button className={btn} onClick={() => zoom(-1)} title="Zoom out" aria-label="Zoom out">
+        <button
+          className={btn}
+          onClick={(e) => {
+            e.currentTarget.blur()
+            zoom(-1)
+          }}
+          title="Zoom out"
+          aria-label="Zoom out"
+        >
           <Minus size={18} />
         </button>
-        <button className={btn} onClick={handleCenter} title="Center on location" aria-label="Center on location">
+        <button
+          className={btn}
+          onClick={(e) => {
+            e.currentTarget.blur()
+            handleCenter()
+          }}
+          title="Center on location"
+          aria-label="Center on location"
+        >
           <Crosshair size={18} />
         </button>
-        <button className={btn} onClick={handleReset} title="Reset view" aria-label="Reset view">
+        <button
+          className={btn}
+          onClick={(e) => {
+            e.currentTarget.blur()
+            handleReset()
+          }}
+          title="Reset view"
+          aria-label="Reset view"
+        >
           <RotateCcw size={18} />
         </button>
       </div>
 
-      {/* Live Direction Compass (North-Up on tap without changing altitude/zoom) */}
-      {showCompass && (
+      {/* Live Direction Compass (3D mode only; North-Up on tap without changing altitude/zoom) */}
+      {showCompass && mode !== '2D' && (
         <button
           type="button"
-          onClick={handleNorthUp}
+          onClick={(e) => {
+            e.currentTarget.blur()
+            handleNorthUp()
+          }}
           title="Orient North up"
           aria-label="Orient North up"
-          className={`group absolute z-20 h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-black/70 shadow-xl backdrop-blur-md transition hover:border-red-500/40 hover:bg-black/85 active:scale-95 ${
+          className={`group absolute z-20 h-11 w-11 items-center justify-center rounded-full border border-white/15 bg-black/70 shadow-xl backdrop-blur-md transition [@media(hover:hover)]:hover:border-red-500/40 [@media(hover:hover)]:hover:bg-black/85 active:scale-95 active:border-[#ff6b57] active:bg-[#e23b2e]/85 ${
             compassClassName || 'bottom-9 left-8 hidden xl:flex'
           }`}
         >
@@ -1109,8 +1317,8 @@ export default function MarsGlobe({
 
       {showCard && cardVisible && (
         <div
-          className={`absolute z-20 w-[240px] rounded-xl border border-white/10 bg-black/80 px-2.5 py-2 shadow-xl backdrop-blur-md transition-all duration-300 sm:w-[260px] ${
-            legendClassName || 'bottom-32 left-1/2 -translate-x-1/2 xl:bottom-36'
+          className={`absolute z-20 w-[236px] rounded-xl border border-white/10 bg-black/80 px-2.5 py-2 shadow-xl backdrop-blur-md transition-all duration-300 sm:w-[252px] ${
+            legendClassName || 'bottom-28 left-1/2 -translate-x-1/2 lg:bottom-14'
           }`}
         >
           <div className="flex items-center justify-between gap-2">
@@ -1124,7 +1332,7 @@ export default function MarsGlobe({
               <X size={12} />
             </button>
           </div>
-          <div className="mt-0.5 line-clamp-2 text-[10.5px] leading-snug text-gray-300">
+          <div className="mt-0.5 text-[10.5px] leading-snug text-gray-300">
             {cfg.note}
           </div>
           {cfg.legend && (
@@ -1135,11 +1343,6 @@ export default function MarsGlobe({
                   <span key={l}>{l}</span>
                 ))}
               </div>
-            </div>
-          )}
-          {used && (
-            <div className="mt-1 truncate text-[9.5px] text-gray-400">
-              Source: {used}
             </div>
           )}
           {status === 'error' && (

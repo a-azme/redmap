@@ -203,7 +203,7 @@ export default function PhotoSphereModal({
   const tileOffsets = useSeamlessLoop ? [-1, 0, 1] : [0]
 
   return (
-    <div className="rm-psv-modal" role="dialog" aria-modal="true" aria-label="360° Surface View">
+    <div className="rm-psv-modal" role="dialog" aria-modal="true" aria-label="360° View">
       {/* High-Resolution Interactive 360° Cylindrical & Deep-Zoom Surface Canvas */}
       <div
         ref={viewportRef}

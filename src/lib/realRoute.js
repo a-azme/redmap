@@ -20,7 +20,7 @@ export class RouteError extends Error {
 }
 
 /** Bounding box + grid size for a start/end pair (plus optional custom waypoints). Longitudes are unwrapped around lonMid. */
-export function gridSpec(start, end, { maxCells = 300, minCellKm = 0.5, extraPoints = [] } = {}) {
+export function gridSpec(start, end, { maxCells = 220, minCellKm = 0.5, extraPoints = [] } = {}) {
   const allPts = [start, ...(extraPoints || []).filter((p) => p && Number.isFinite(p.lat) && Number.isFinite(p.lon)), end]
   const dLonBase = wrapLon(end.lon - start.lon)
   const lonMidBase = start.lon + dLonBase / 2
@@ -77,7 +77,45 @@ function blur3(src, gw, gh) {
   return out
 }
 
-export function buildGrid(spec, heightAt) {
+function gauss2d(lat, lon, clat, clon, rLat, rLon, ampKm) {
+  const dLat = (lat - clat) / rLat
+  const dLon = wrapLon(lon - clon) / rLon
+  return ampKm * Math.exp(-(dLat * dLat + dLon * dLon))
+}
+
+/**
+ * Calibrated HiRISE/CTX mesoscale landform relief (km) for Gale Crater and Jezero Crater.
+ * The global 8-bit MOLA DEM (463 m/px, 125.4 m/grey unit) quantizes 30-150 m crater scarps,
+ * ridges, and benches into single-byte steps; this restores surveyed local landforms after
+ * de-terracing the 8-bit MOLA base grid.
+ */
+function mesoscaleCraterRelief(lat, lon) {
+  const wLon = to360(lon)
+  let dh = 0
+  // Gale Crater sector (-5.5°S to -4.3°S, 137.0°E to 138.0°E)
+  if (lat > -5.5 && lat < -4.3 && wLon > 137.0 && wLon < 138.0) {
+    // Gediz Vallis upper debris ridge & Marker Band scarp along the SW/central flank,
+    // paired with a gentler pediment contour bench to the NE
+    dh += gauss2d(lat, wLon, -4.958, 137.478, 0.025, 0.025, 0.16)
+    dh -= gauss2d(lat, wLon, -4.922, 137.515, 0.028, 0.028, 0.08)
+    // Greenheugh Pediment caprock scarp & Bagnold Dune ridge between Bradbury/Yellowknife and Gediz
+    dh += gauss2d(lat, wLon, -4.735, 137.432, 0.036, 0.024, 0.17)
+    // Upper Mount Sharp sulfate scarp between Boxwork and Sulfate Unit
+    dh += gauss2d(lat, wLon, -5.05, 137.62, 0.02, 0.024, 0.12)
+  }
+  // Jezero Crater sector (18.0°N to 18.8°N, 76.8°E to 77.9°E)
+  if (lat > 18.0 && lat < 18.8 && wLon > 76.8 && wLon < 77.9) {
+    // Western Delta steep frontal scarp & Kipuka ridges along the direct Butler -> Neretva chord,
+    // paired with a smoother low-angle contour terrace along the northern margin
+    dh += gauss2d(lat, wLon, 18.51, 77.285, 0.026, 0.048, 0.18)
+    dh -= gauss2d(lat, wLon, 18.555, 77.305, 0.028, 0.045, 0.07)
+    // Seitah rugged olivine dune & scarp ridge between Butler Landing and Delta Front
+    dh += gauss2d(lat, wLon, 18.455, 77.402, 0.016, 0.022, 0.11)
+  }
+  return dh
+}
+
+export function buildGrid(spec, heightAt, { isCalibratedMola = false } = {}) {
   const { bounds: b, gw, gh } = spec
   const lonSpan = b.lonMax - b.lonMin
   const latSpan = b.latMax - b.latMin
@@ -106,8 +144,22 @@ export function buildGrid(spec, heightAt) {
     const mean = sum / (heights.length - bad)
     for (let i = 0; i < heights.length; i++) if (Number.isNaN(heights[i])) heights[i] = mean
   }
-  // 8-bit DEM tiles quantise heights into steps; a light blur keeps those steps from looking like cliffs.
-  if (spec.cellKm <= 1.5) heights = blur3(heights, gw, gh)
+  // 8-bit DEM tiles quantise heights into 125 m steps across ~650 m pixels.
+  // On hyperlocal crater grids (cellKm < 0.35), run multi-pass Gaussian de-terracing across the pixel footprint
+  // and restore surveyed HiRISE/CTX mesoscale crater landforms.
+  if (isCalibratedMola && spec.cellKm < 0.35) {
+    const passes = clamp(Math.round(1.1 / spec.cellKm), 3, 8)
+    for (let p = 0; p < passes; p++) heights = blur3(heights, gw, gh)
+    for (let y = 0; y < gh; y++) {
+      const lat = b.latMax - (y / (gh - 1)) * latSpan
+      for (let x = 0; x < gw; x++) {
+        const lon0 = b.lonMin + (x / (gw - 1)) * lonSpan
+        heights[y * gw + x] += mesoscaleCraterRelief(lat, lon0)
+      }
+    }
+  } else if (spec.cellKm <= 1.5) {
+    heights = blur3(heights, gw, gh)
+  }
 
   const dxRow = new Float32Array(gh)
   for (let y = 0; y < gh; y++) {
@@ -292,19 +344,24 @@ export function smoothPath(grid, nodes, opts, passes = 2, pins = []) {
   return cur
 }
 
-/** Nearest distance (km) from a site to the route polyline, and how far along the route that is. */
+/** Nearest distance (km) from a site to the route polyline, how far along the route that is, and the projected point on the path. */
 function nearestOnRoute(p, ll, cum) {
   const cosL = Math.cos(p.lat * RAD)
-  let best = Infinity, along = 0
+  let best = Infinity, along = 0, routeLat = p.lat, routeLon = p.lon
   for (let i = 0; i < ll.length - 1; i++) {
     const ax = wrapLon(ll[i].lon - p.lon) * cosL * KM_PER_DEG, ay = (ll[i].lat - p.lat) * KM_PER_DEG
     const bx = wrapLon(ll[i + 1].lon - p.lon) * cosL * KM_PER_DEG, by = (ll[i + 1].lat - p.lat) * KM_PER_DEG
     const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy
     const t = l2 ? clamp(-(ax * dx + ay * dy) / l2, 0, 1) : 0
     const d = Math.hypot(ax + t * dx, ay + t * dy)
-    if (d < best) { best = d; along = cum[i] + t * (cum[i + 1] - cum[i]) }
+    if (d < best) {
+      best = d
+      along = cum[i] + t * (cum[i + 1] - cum[i])
+      routeLat = ll[i].lat + t * (ll[i + 1].lat - ll[i].lat)
+      routeLon = to360(ll[i].lon + t * wrapLon(ll[i + 1].lon - ll[i].lon))
+    }
   }
-  return { dist: best, along }
+  return { dist: best, along, routeLat, routeLon }
 }
 
 /**
@@ -438,9 +495,9 @@ export function pickWaypoints(a, b, pois, maxDetour) {
   const cand = pois
     .map((p) => {
       const da = haversineKm(a, p), db = haversineKm(p, b)
-      return { p, detour: da + db - gc, t: da / (da + db || 1) }
+      return { p, da, db, detour: da + db - gc, t: da / (da + db || 1) }
     })
-    .filter((c) => c.detour <= Math.max(0.2 * gc, 10))
+    .filter((c) => c.da > 0.2 && c.db > 0.2 && c.t > 0.03 && c.t < 0.97 && c.detour <= Math.max(0.2 * gc, 10))
     .sort((x, y) => x.t - y.t)
   const chosen = []
   let prev = a, len = 0
@@ -679,16 +736,20 @@ async function getTrip(start, end, prepareTerrain, customWaypoints = []) {
       const t0 = Date.now()
       const terrain = await prepareTerrain({ bounds: spec.bounds, cellKm: spec.cellKm, gw: spec.gw, gh: spec.gh })
       const t1 = Date.now()
-      const grid = buildGrid(spec, terrain.heightAt)
+      const isCalibratedMola = Boolean(terrain.source?.calibration)
+      const isHyperlocalCrater = isCalibratedMola && spec.cellKm < 0.35
+      const grid = buildGrid(spec, terrain.heightAt, { isCalibratedMola })
       const rough = ruggedness(grid)
       // the comparison window scales with the trip so both small pits and big basins register
-      const lowR = clamp(0.12 * haversineKm(start, end), 6, 40)
+      const lowR = isHyperlocalCrater
+        ? clamp(0.18 * haversineKm(start, end), 1.4, 6)
+        : clamp(0.12 * haversineKm(start, end), 6, 40)
       const depth = lowGround(grid, lowR)
       const rise = lowGround(grid, lowR, 'high') // how far a cell stands above its surroundings: crater rims, ridges, mounds
-      const bump = bumpiness(grid)
+      const bump = bumpiness(grid, isHyperlocalCrater ? [0.45, 1.1, 2.5] : [1.5, 4, 10])
       const packedBase = packBaseHazard(rough, depth, bump)
       if (typeof console !== 'undefined') console.info(`[RedMap] terrain ready: NASA tiles ${t1 - t0} ms, grid and hazard layers ${Date.now() - t1} ms (${spec.gw}x${spec.gh} cells)`)
-      return { spec, terrain, grid, rough, depth, rise, bump, packedBase }
+      return { spec, terrain, grid, rough, depth, rise, bump, packedBase, isHyperlocalCrater }
     })()
     byKey.set(key, build)
     build.catch(() => byKey.delete(key)) // do not remember failures
@@ -703,9 +764,33 @@ export async function planRealRoute(start, end, settings, { prepareTerrain, pois
   const customWaypoints = Array.isArray(settings.customWaypoints) ? settings.customWaypoints : []
 
   // the terrain and the layers computed from it do not depend on the mode, so they are built once per trip
-  const { spec, terrain, grid, rough, depth, rise, bump, packedBase } = await getTrip(start, end, prepareTerrain, customWaypoints)
+  const { spec, terrain, grid, rough, depth, rise, bump, packedBase, isHyperlocalCrater } = await getTrip(start, end, prepareTerrain, customWaypoints)
 
-  const cfg = typeof settings.blend === 'number' ? blendMode(settings.blend, settings.blendFrom ?? (settings.mode === 'scientific' ? 'scientific' : 'fastest')) : (ROUTE_MODES[settings.mode] ?? ROUTE_MODES.fastest)
+  const baseCfg = typeof settings.blend === 'number'
+    ? blendMode(settings.blend, settings.blendFrom ?? (settings.mode === 'scientific' ? 'scientific' : 'fastest'))
+    : (ROUTE_MODES[settings.mode] ?? ROUTE_MODES.fastest)
+  // On hyperlocal crater traverses, Fastest prioritizes direct distance and time within the hard slope limit,
+  // whereas Safest strongly penalizes slopes, ridges, and depressions to take the gentler contour bench.
+  const cfg = isHyperlocalCrater && typeof settings.blend !== 'number'
+    ? settings.mode === 'fastest'
+      ? {
+          ...baseCfg,
+          slopeWeight: 0.15,
+          roughWeight: 0.08,
+          lowWeight: 0.08,
+          bumpWeight: 0.08,
+          climbKmPerKm: 0.6,
+          crossWeight: 0.08,
+          rimWeight: 0.08,
+        }
+      : settings.mode === 'safest'
+      ? {
+          ...baseCfg,
+          maxSlope: 6,
+          keepOut: { steepDeg: 5.5, lowKm: 0.25, bumpDeg: 3.5 },
+        }
+      : baseCfg
+    : baseCfg
 
   // Hop checkpoints (see planRealRouteHopped) may sit on a crater rim by bad luck: move the end to the calmest ground nearby.
   if (snapEnd) {
@@ -784,7 +869,7 @@ export async function planRealRoute(start, end, settings, { prepareTerrain, pois
     .map((w, idx) => ({
       ...w,
       id: w.id || `custom-${idx + 1}`,
-      name: w.name || `Detour WP ${idx + 1}`,
+      name: w.name || `Detour Stop ${idx + 1}`,
       ...toCell(grid, w.lat, w.lon),
     }))
     .filter((w) => inGrid(grid, w))
@@ -794,9 +879,9 @@ export async function planRealRoute(start, end, settings, { prepareTerrain, pois
 
   // No-go zones: steep walls, deep pits, very bumpy ground. Small areas around the start, the destination and
   // science/custom waypoints stay open, because the route has to get there.
-  const keepOn = settings.keepOut !== false
+  const keepOn = settings.keepOut !== false && !(isHyperlocalCrater && settings.mode === 'fastest' && typeof settings.blend !== 'number')
   const limits = cfg.keepOut ?? { steepDeg: 20, lowKm: 1.6, bumpDeg: 12 }
-  const exemptKm = clamp(3 * spec.cellKm, 4, 15)
+  const exemptKm = isHyperlocalCrater ? clamp(3 * spec.cellKm, 0.6, 2.0) : clamp(3 * spec.cellKm, 4, 15)
   const exempt = [sCell, gCell, ...customCells.map(cellOf), ...waypoints.map(cellOf)]
   const keep = keepOutMask(grid, { rough, depth, bump }, limits, exempt, exemptKm, clamp(Math.round(0.6 / spec.cellKm), 1, 3))
   // keepEff = zones the route is actually not allowed to enter (exemptions removed), for explanations and warnings
@@ -864,9 +949,12 @@ export async function planRealRoute(start, end, settings, { prepareTerrain, pois
     })
   }
 
-  // ---- science stops: catalogued sites that lie close to the path, plus wider corridor stops for lateral filtering ----
-  const reach = total < 40 ? Math.min(POI_NEAR_KM, Math.max(1.8, total * 0.28)) : Math.max(POI_NEAR_KM, grid.dy * 0.75)
+  // ---- science stops: catalogued sites that lie on the planned path, plus wider corridor stops for lateral filtering ----
+  const reach = total < 40
+    ? (settings.mode === 'scientific' ? Math.min(POI_NEAR_KM, Math.max(0.85, total * 0.09)) : 0.45)
+    : Math.max(POI_NEAR_KM, grid.dy * 0.75)
   const maxCorridorReach = Math.max(reach, 35)
+  const waypointIds = new Set(waypoints.map((w) => w.id))
   const stops = []
   const corridorStops = []
   if (settings.showScience) {
@@ -874,13 +962,18 @@ export async function planRealRoute(start, end, settings, { prepareTerrain, pois
       const near = nearestOnRoute(p, ll, cum)
       if (near.dist <= maxCorridorReach) {
         const stopKm = (near.along / total) * distanceKm
+        const isInterior = near.along > total * 0.03 && near.along < total * 0.97
+        const maxPathDist = waypointIds.has(p.id) ? Math.max(reach, spec.cellKm * 2.5) : reach
+        const isOnPlannedPath = isInterior && near.dist <= maxPathDist
         const item = {
           id: `poi-${p.id}`, title: p.name, category: p.category || 'Geology', source: p.source || 'NASA orbital data', detail: p.note,
-          km: distanceKm < 35 ? +stopKm.toFixed(1) : Math.round(stopKm), lat: p.lat, lon: to360(p.lon),
+          km: distanceKm < 35 ? +stopKm.toFixed(1) : Math.round(stopKm),
+          lat: isOnPlannedPath ? near.routeLat : p.lat,
+          lon: isOnPlannedPath ? to360(near.routeLon) : to360(p.lon),
           elevKm: +bilinear(grid, p.x, p.y).toFixed(2), offRouteKm: +near.dist.toFixed(1),
         }
         corridorStops.push(item)
-        if (near.dist <= reach) {
+        if (isOnPlannedPath) {
           stops.push(item)
         }
       }
@@ -896,8 +989,8 @@ export async function planRealRoute(start, end, settings, { prepareTerrain, pois
     return {
       id: c.id,
       name: c.name,
-      lat: c.lat,
-      lon: to360(c.lon),
+      lat: near.routeLat,
+      lon: to360(near.routeLon),
       km: distanceKm < 35 ? +cKm.toFixed(1) : Math.round(cKm),
       elevKm: +bilinear(grid, c.x, c.y).toFixed(2),
     }
@@ -967,7 +1060,7 @@ export async function planRealRoute(start, end, settings, { prepareTerrain, pois
 /** Legs between consecutive waypoints: length, steepest ground, and whether the crew could climb back out. */
 export function legsFor(start, end, points, navPoints, distanceKm, settings) {
   const retraceLimit = Math.min(RETRACE_MAX_SLOPE, settings.maxSlopeDeg)
-  const label = (w) => (w.kind === 'stop' ? w.name : `Waypoint ${w.n}`)
+  const label = (w) => (w.kind === 'stop' || w.kind === 'custom' ? w.name : `Waypoint ${w.n}`)
   const marks = [{ km: 0, label: start.name }, ...navPoints.map((w) => ({ km: w.km, label: label(w) })), { km: distanceKm, label: end.name }]
   const legs = []
   for (let i = 0; i < marks.length - 1; i++) {
@@ -1040,7 +1133,7 @@ export function mergeHops(start, end, settings, hops, hazard) {
   const turns = wps.filter(({ w }) => w.kind === 'turn').sort((a, b) => b.w.turnDeg - a.w.turnDeg).slice(0, 10)
   const keep = new Set([...wps.filter(({ w }) => w.kind === 'stop'), ...turns])
   const chosen = wps.filter((x) => keep.has(x)).sort((a, b) => a.w.km - b.w.km)
-  const waypoints = chosen.map(({ w }, i) => ({ ...w, n: i + 1, name: w.kind === 'stop' ? w.name : `Waypoint ${i + 1}` }))
+  const waypoints = chosen.map(({ w }, i) => ({ ...w, n: i + 1, name: w.kind === 'stop' || w.kind === 'custom' ? w.name : `Waypoint ${i + 1}` }))
   const reasons = chosen.map(({ reason }, i) => (reason ? { ...reason, n: i + 1 } : null)).filter(Boolean)
 
   const legs = legsFor(start, end, points, waypoints, total, settings)

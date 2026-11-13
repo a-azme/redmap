@@ -42,15 +42,7 @@ const LAYER_ICONS = {
   atmosphere: Wind,
 }
 
-const menu = [
-  { label: '3D Globe', icon: Globe },
-  { label: 'Map View', icon: Map },
-  { label: 'Layers', icon: Layers },
-  { label: 'Locations', icon: MapPin },
-  { label: 'Missions', icon: Rocket },
-]
-
-const tabs = ['Popular Locations', 'Regions', 'Landforms', 'Features', 'Missions']
+const tabs = ['Popular Locations', 'Regions', 'Landforms', 'Features']
 
 const TYPE_COLOR = { rover: '#ff5a4f', lander: '#f5a524', orbiter: '#5aa9ff' }
 
@@ -271,16 +263,13 @@ export default function ExplorePage() {
   const setDesktopDrawerOpen = useMapStore((s) => s.setDesktopDrawerOpen)
   const selectWithDetails = useMapStore((s) => s.selectWithDetails)
 
-  const [view, setView] = useState('3D Globe')
   const [mapMode, setMapMode] = useState('3D')
   const [activeLayer, setActiveLayer] = useState('terrain')
   const [layersOpen, setLayersOpen] = useState(false)
-  const [showRovers, setShowRovers] = useState(
-    () => searchParams.get('tab') === 'missions'
+  const [exploreMode, setExploreMode] = useState(() =>
+    searchParams.get('tab') === 'missions' ? 'missions' : 'locations'
   )
-  const [tab, setTab] = useState(() =>
-    searchParams.get('tab') === 'missions' ? 'Missions' : 'Popular Locations'
-  )
+  const [tab, setTab] = useState('Popular Locations')
   const [missionFilter, setMissionFilter] = useState('all')
   const [activeMissionId, setActiveMissionId] = useState(null)
   const [missionHistory, setMissionHistory] = useState([])
@@ -288,11 +277,35 @@ export default function ExplorePage() {
   const [camState, setCamState] = useState(() => ({
     altKm: typeof window !== 'undefined' && window.innerWidth >= 1024 ? 12000 : 8000,
     level: 1,
+    lat: 18,
+    lon: 77,
   }))
   const [hoverCoord, setHoverCoord] = useState(null)
+  const [isDesktopLg, setIsDesktopLg] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia
+      ? window.matchMedia('(min-width: 1024px)').matches
+      : false
+  )
 
+  const menuRef = useRef(null)
+  const layersBtnRef = useRef(null)
+  const layersPopoverRef = useRef(null)
+  const sheetRef = useRef(null)
+  const openDrawerPillRef = useRef(null)
   const scrollBodyRef = useRef(null)
   const touchStartYRef = useRef(null)
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return undefined
+    const mql = window.matchMedia('(min-width: 1024px)')
+    const onChange = (e) => setIsDesktopLg(e.matches)
+    if (mql.addEventListener) {
+      mql.addEventListener('change', onChange)
+      return () => mql.removeEventListener('change', onChange)
+    }
+    mql.addListener(onChange)
+    return () => mql.removeListener(onChange)
+  }, [])
 
   const selected = useMemo(() => {
     const found = storeSelected && locations.find((l) => l.id === storeSelected.id)
@@ -303,6 +316,32 @@ export default function ExplorePage() {
     () => (activeMissionId ? missionById(activeMissionId) : null),
     [activeMissionId]
   )
+
+  // Surface mission spots on Mars (used when exploreMode === 'missions' with the same naming & pinning rules as locations)
+  const missionSpots = useMemo(() => {
+    return MISSIONS.filter((m) => m.lat != null).map((m) => {
+      const matchedLoc = m.locId && locations.find((l) => l.id === m.locId)
+      return {
+        ...(matchedLoc || {}),
+        id: m.id,
+        name: m.site,
+        rawName: m.site,
+        lat: m.lat,
+        lon: m.lon,
+        level: 2,
+        min_alt_km: 0.5,
+        max_alt_km: 18000,
+        diameter: matchedLoc?.diameter || 120,
+        color: TYPE_COLOR[m.type] || '#ef4444',
+        category: 'NASA_MISSION_HUB',
+        is_nasa: true,
+        isMissionSpot: true,
+        missionId: m.id,
+      }
+    })
+  }, [locations])
+
+  const globeLocations = exploreMode === 'missions' ? missionSpots : locations
 
   const missionPov = useMemo(
     () =>
@@ -333,11 +372,9 @@ export default function ExplorePage() {
   // Sync ?tab=missions query param if navigated from /missions redirect
   useEffect(() => {
     if (searchParams.get('tab') === 'missions') {
-      setDesktopDrawerOpen(true)
-      setSheetSnap((prev) => (prev === 'peek' ? 'half' : prev))
       setSearchParams({}, { replace: true })
     }
-  }, [searchParams, setDesktopDrawerOpen, setSheetSnap, setSearchParams])
+  }, [searchParams, setSearchParams])
 
   // Scroll sheet/panel back to top whenever a new location or mission details are opened
   useEffect(() => {
@@ -346,18 +383,50 @@ export default function ExplorePage() {
     }
   }, [detailsOpen, selected.id, activeMissionId])
 
-  // Allow Escape key to close the open desktop Explore Mars drawer or Layers popover
+  // Allow Escape key to close the Layers popover or collapse the sheet/drawer
   useEffect(() => {
-    if (!desktopDrawerOpen && !layersOpen) return
     const onKeyDown = (e) => {
       if (e.key === 'Escape') {
         if (layersOpen) setLayersOpen(false)
-        else setDesktopDrawerOpen(false)
+        else if (desktopDrawerOpen || sheetSnap !== 'peek') {
+          setDesktopDrawerOpen(false)
+          setSheetSnap('peek')
+        }
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [desktopDrawerOpen, layersOpen, setDesktopDrawerOpen])
+  }, [desktopDrawerOpen, layersOpen, sheetSnap, setDesktopDrawerOpen, setSheetSnap])
+
+  // Dismiss floating Layers card on outside tap, and collapse expanded sheet/drawer on outside tap
+  useEffect(() => {
+    const onPointerDown = (e) => {
+      const target = e.target
+      if (!target) return
+
+      if (layersOpen) {
+        const inLayersCard = layersPopoverRef.current?.contains(target)
+        const inLayersBtn = layersBtnRef.current?.contains(target)
+        if (!inLayersCard && !inLayersBtn) {
+          setLayersOpen(false)
+        }
+      }
+
+      // Collapse mobile bottom sheet on outside tap (desktop right sidebar has explicit collapse button)
+      if (!isDesktopLg && sheetSnap !== 'peek') {
+        const inSheet = sheetRef.current?.contains(target)
+        const inMenu = menuRef.current?.contains(target)
+        const inOpenPill = openDrawerPillRef.current?.contains(target)
+        const inLayersCard = layersPopoverRef.current?.contains(target)
+        if (!inSheet && !inMenu && !inOpenPill && !inLayersCard) {
+          setSheetSnap('peek')
+        }
+      }
+    }
+
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => document.removeEventListener('pointerdown', onPointerDown, true)
+  }, [layersOpen, isDesktopLg, desktopDrawerOpen, sheetSnap, setDesktopDrawerOpen, setSheetSnap])
 
   const openMissionDetails = useCallback(
     (mission, pushCurrent = false) => {
@@ -367,9 +436,9 @@ export default function ExplorePage() {
       } else if (!pushCurrent) {
         setMissionHistory([])
       }
+      setExploreMode('missions')
       setActiveMissionId(mission.id)
       setDetailsOpen(false)
-      setShowRovers(true)
       setDesktopDrawerOpen(true)
       setSheetSnap((prev) => (prev === 'peek' ? 'half' : prev))
       if (mission.lat != null) {
@@ -377,7 +446,7 @@ export default function ExplorePage() {
         setSelected(
           matchedLoc || {
             id: mission.id,
-            name: `${mission.name} (${mission.site})`,
+            name: mSiteName(mission),
             lat: mission.lat,
             lon: mission.lon,
             min_alt_km: 50,
@@ -390,6 +459,10 @@ export default function ExplorePage() {
     [activeMissionId, locations, setDetailsOpen, setDesktopDrawerOpen, setSelected, setSheetSnap]
   )
 
+  function mSiteName(mission) {
+    return mission.site || mission.name
+  }
+
   const handleMissionBack = () => {
     if (missionHistory.length > 0) {
       const prevId = missionHistory[missionHistory.length - 1]
@@ -401,7 +474,7 @@ export default function ExplorePage() {
         setSelected(
           matchedLoc || {
             id: prevMission.id,
-            name: `${prevMission.name} (${prevMission.site})`,
+            name: mSiteName(prevMission),
             lat: prevMission.lat,
             lon: prevMission.lon,
             min_alt_km: 50,
@@ -415,52 +488,46 @@ export default function ExplorePage() {
     }
   }
 
-  const handleMenuClick = (label) => {
-    if (label === 'Locations') {
-      setActiveMissionId(null)
-      if (tab === 'Missions') setTab('Popular Locations')
-      const isDesktop = typeof window !== 'undefined' && window.innerWidth >= 1024
-      if (isDesktop) {
-        setDesktopDrawerOpen((prev) => (tab === 'Missions' ? true : !prev))
+  // 1. Toggle 3D Globe <-> 2D Map (only active while pressed, returns to normal state)
+  const handleToggleMapMode = (e) => {
+    e.currentTarget.blur()
+    setLayersOpen(false)
+    setMapMode((prev) => (prev === '3D' ? '2D' : '3D'))
+  }
+
+  // 2. Toggle floating Layers card (active only while floating card is visible)
+  const handleToggleLayers = (e) => {
+    e.currentTarget.blur()
+    setLayersOpen((prev) => !prev)
+  }
+
+  // 3. Toggle Locations <-> Missions (switches map points & sheet content without expanding sheet)
+  const handleToggleExploreMode = (e) => {
+    e.currentTarget.blur()
+    setLayersOpen(false)
+    setExploreMode((prev) => {
+      const next = prev === 'locations' ? 'missions' : 'locations'
+      if (next === 'locations') {
+        setActiveMissionId(null)
+        setMissionHistory([])
       } else {
-        setSheetSnap((prev) => (prev === 'peek' ? 'half' : 'peek'))
+        setDetailsOpen(false)
       }
-      return
-    }
-
-    if (label === 'Missions') {
-      setDetailsOpen(false)
-      setTab('Missions')
-      setShowRovers(true)
-      const isDesktop = typeof window !== 'undefined' && window.innerWidth >= 1024
-      if (isDesktop) {
-        setDesktopDrawerOpen((prev) => (tab !== 'Missions' ? true : !prev))
-      } else {
-        setSheetSnap((prev) => (prev === 'peek' ? 'half' : prev))
-      }
-      return
-    }
-
-    if (label === 'Layers') {
-      setLayersOpen((prev) => !prev)
-      return
-    }
-
-    setView(label)
-    if (label === '3D Globe') setMapMode('3D')
-    else if (label === 'Map View') setMapMode('2D')
+      return next
+    })
   }
 
   const handleSelectLocation = useCallback(
     (loc) => {
       if (!loc) return
-      if (loc.isRoverPin) {
-        const m = missionById(loc.id)
+      if (loc.isMissionSpot || loc.isRoverPin) {
+        const m = missionById(loc.missionId || loc.id)
         if (m) {
           openMissionDetails(m, false)
           return
         }
       }
+      setExploreMode('locations')
       setActiveMissionId(null)
       setMissionHistory([])
       selectWithDetails(loc)
@@ -518,107 +585,168 @@ export default function ExplorePage() {
       })
   }, [locations, tab])
 
+  const hasActiveTarget = Boolean(detailsOpen || activeMission || storeFocus)
   const activeLat = hoverCoord
     ? hoverCoord.lat
     : activeMission && activeMission.lat != null
     ? activeMission.lat
-    : selected.lat
+    : hasActiveTarget
+    ? selected.lat
+    : camState.lat
   const activeLon = hoverCoord
     ? hoverCoord.lon
     : activeMission && activeMission.lon != null
     ? activeMission.lon
-    : selected.lon
+    : hasActiveTarget
+    ? selected.lon
+    : camState.lon
   const scale = useMemo(() => getMapScale(camState.altKm), [camState.altKm])
-  const effectiveShowRovers = showRovers || tab === 'Missions' || Boolean(activeMissionId)
+
+  const isMissionsMode = exploreMode === 'missions'
+  const isSheetExpanded = isDesktopLg ? desktopDrawerOpen : sheetSnap !== 'peek'
+  const activeLayerShort = LAYER_CATALOG.find((l) => l.id === activeLayer)?.short
 
   const drawerTitle = activeMission
     ? activeMission.name
     : detailsOpen
     ? selected.name
-    : tab === 'Missions'
+    : isMissionsMode
     ? 'NASA Missions'
     : 'Explore Mars'
+
+  const ViewIcon = mapMode === '3D' ? Globe : Map
+  const viewLabel = mapMode === '3D' ? '3D Globe' : '2D Map'
+  const ModeIcon = isMissionsMode ? Rocket : MapPin
+  const modeLabel = isMissionsMode ? 'Missions' : 'Locations'
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-bg text-white">
       {/* Full-viewport globe container on both mobile and desktop */}
       <div className="relative h-full w-full lg:absolute lg:inset-0">
         <MarsGlobe
-          locations={locations}
+          locations={globeLocations}
           focus={storeFocus}
           onSelect={handleSelectLocation}
           onHoverCoord={setHoverCoord}
           enableCrosshair
           mode={mapMode}
           layer={activeLayer}
-          showRovers={effectiveShowRovers}
+          showRovers={false}
           showCompass
-          compassClassName="bottom-14 left-4 hidden lg:flex"
-          legendClassName="bottom-20 left-1/2 -translate-x-1/2 lg:bottom-6"
-          onCameraChange={(altKm, level) => setCamState({ altKm, level })}
-          onCenter={() => setSelected({ ...selected })}
+          compassClassName="bottom-[116px] left-2.5 flex lg:bottom-14 lg:left-4"
+          legendClassName="bottom-28 left-1/2 -translate-x-1/2 lg:bottom-14"
+          onCameraChange={(altKm, level, lat, lon) =>
+            setCamState((prev) => ({
+              altKm,
+              level,
+              lat: typeof lat === 'number' ? lat : prev.lat,
+              lon: typeof lon === 'number' ? lon : prev.lon,
+            }))
+          }
+          onCenter={() => {
+            if (activeMission && activeMission.lat != null) {
+              const matchedLoc =
+                activeMission.locId && locations.find((l) => l.id === activeMission.locId)
+              setSelected(
+                matchedLoc || {
+                  id: activeMission.id,
+                  name: mSiteName(activeMission),
+                  lat: activeMission.lat,
+                  lon: activeMission.lon,
+                  min_alt_km: 50,
+                  max_alt_km: 1800,
+                  diameter: 120,
+                }
+              )
+              return true
+            }
+            if (detailsOpen || storeFocus) {
+              setSelected({ ...selected })
+              return true
+            }
+            return false
+          }}
           onReset={() => {
             setActiveMissionId(null)
             setMissionHistory([])
             clearFocus()
           }}
-          controlsClassName={`right-3 top-3 sm:right-4 sm:top-4 transition-all duration-300 ease-out ${
+          controlsClassName={`right-2.5 top-2.5 transition-all duration-300 ease-out ${
             desktopDrawerOpen ? 'lg:right-[452px] lg:top-4' : 'lg:right-4 lg:top-4'
           }`}
         />
 
-        {/* Top-left mode switcher */}
+        {/* Top-left 3-button control bar: (1) 3D/2D Toggle, (2) Layers, (3) Locations/Missions Toggle */}
         <aside
-          className={`absolute left-2.5 top-2.5 z-10 flex overflow-hidden py-1 lg:left-4 lg:top-4 lg:block lg:w-[205px] lg:py-2 ${panel}`}
+          ref={menuRef}
+          className={`absolute left-2.5 top-2.5 z-10 flex items-center gap-1 overflow-hidden p-0.5 lg:left-4 lg:top-4 lg:block lg:w-[205px] lg:p-0 lg:py-1.5 ${panel}`}
         >
-          {menu.map(({ label, icon: Icon }) => {
-            const isLocations = label === 'Locations'
-            const isMissions = label === 'Missions'
-            const isLayers = label === 'Layers'
-            const isDrawerShowingMissions = tab === 'Missions' || Boolean(activeMissionId)
-            const isActive = isLocations
-              ? !isDrawerShowingMissions && (desktopDrawerOpen || sheetSnap !== 'peek')
-              : isMissions
-              ? isDrawerShowingMissions && (desktopDrawerOpen || sheetSnap !== 'peek')
-              : isLayers
-              ? layersOpen || activeLayer !== 'terrain' || showRovers
-              : view === label
-            const activeLayerShort = LAYER_CATALOG.find((l) => l.id === activeLayer)?.short
-            return (
-              <button
-                key={label}
-                title={label}
-                aria-label={label}
-                onClick={() => handleMenuClick(label)}
-                className={`flex items-center justify-between gap-2 px-3 py-2.5 text-left text-sm font-bold transition lg:w-full lg:px-4 lg:py-2.5 ${
-                  isActive
-                    ? 'bg-red-500/20 text-white'
-                    : 'text-gray-400 hover:bg-white/5 hover:text-white'
-                }`}
-              >
-                <span className="flex items-center gap-3">
-                  <Icon size={18} />
-                  <span className="hidden lg:inline">{label}</span>
-                </span>
-                {isLayers && (
-                  <span className="hidden rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-medium text-gray-300 lg:inline">
-                    {activeLayerShort}
-                  </span>
-                )}
-                {isMissions && (
-                  <span className="hidden rounded bg-red-500/20 px-1.5 py-0.5 text-[10px] font-medium text-red-300 lg:inline">
-                    {MISSIONS.length}
-                  </span>
-                )}
-              </button>
-            )
-          })}
+          {/* 1. Merged 3D Globe / 2D Map button: only shows active state while pressed */}
+          <button
+            type="button"
+            title={`Switch to ${mapMode === '3D' ? '2D Map' : '3D Globe'}`}
+            aria-label={viewLabel}
+            onClick={handleToggleMapMode}
+            className="flex h-[34px] w-[36px] items-center justify-center rounded-[9px] text-left text-sm font-bold text-gray-300 transition [@media(hover:hover)]:hover:bg-white/5 [@media(hover:hover)]:hover:text-white active:scale-95 active:bg-[#e23b2e]/85 active:text-white lg:h-auto lg:w-full lg:justify-between lg:rounded-none lg:px-4 lg:py-2.5"
+          >
+            <span className="flex items-center gap-3">
+              <ViewIcon size={16} className="lg:h-[18px] lg:w-[18px]" />
+              <span className="hidden lg:inline">{viewLabel}</span>
+            </span>
+          </button>
+
+          {/* 2. Layers button: active state only while the floating Layers card is visible */}
+          <button
+            ref={layersBtnRef}
+            type="button"
+            title="NASA Data Layers"
+            aria-label="Layers"
+            aria-expanded={layersOpen}
+            onClick={handleToggleLayers}
+            className={`flex h-[34px] w-[36px] items-center justify-center rounded-[9px] text-left text-sm font-bold transition lg:h-auto lg:w-full lg:justify-between lg:rounded-none lg:px-4 lg:py-2.5 ${
+              layersOpen
+                ? 'bg-[#e23b2e]/85 text-white'
+                : 'text-gray-300 [@media(hover:hover)]:hover:bg-white/5 [@media(hover:hover)]:hover:text-white active:scale-95 active:bg-[#e23b2e]/85 active:text-white'
+            }`}
+          >
+            <span className="flex items-center gap-3">
+              <Layers size={16} className="lg:h-[18px] lg:w-[18px]" />
+              <span className="hidden lg:inline">Layers</span>
+            </span>
+            <span className="hidden rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-medium text-gray-300 lg:inline">
+              {activeLayerShort}
+            </span>
+          </button>
+
+          {/* 3. Merged Locations / Missions toggle button: toggles map pins & sheet mode without expanding sheet; active when sheet is expanded */}
+          <button
+            type="button"
+            title={`Toggle between Locations and Missions (currently ${modeLabel})`}
+            aria-label={modeLabel}
+            onClick={handleToggleExploreMode}
+            className={`flex h-[34px] w-[36px] items-center justify-center rounded-[9px] text-left text-sm font-bold transition lg:h-auto lg:w-full lg:justify-between lg:rounded-none lg:px-4 lg:py-2.5 ${
+              isSheetExpanded
+                ? 'bg-[#e23b2e]/85 text-white'
+                : 'text-gray-300 [@media(hover:hover)]:hover:bg-white/5 [@media(hover:hover)]:hover:text-white active:scale-95 active:bg-[#e23b2e]/85 active:text-white'
+            }`}
+          >
+            <span className="flex items-center gap-3">
+              <ModeIcon size={16} className="lg:h-[18px] lg:w-[18px]" />
+              <span className="hidden lg:inline">{modeLabel}</span>
+            </span>
+            {isMissionsMode && (
+              <span className="hidden rounded bg-red-500/20 px-1.5 py-0.5 text-[10px] font-medium text-red-300 lg:inline">
+                {missionSpots.length}
+              </span>
+            )}
+          </button>
         </aside>
 
         {/* Compact NASA Map Layers popover anchored below top-left menu */}
         {layersOpen && (
           <div
-            className={`absolute left-2.5 top-[58px] z-30 w-[290px] p-3 shadow-2xl sm:w-[310px] lg:left-4 lg:top-[252px] ${panel}`}
+            ref={layersPopoverRef}
+            className={`absolute left-2.5 top-[50px] z-30 w-[290px] p-3 shadow-2xl sm:w-[310px] lg:left-4 lg:top-[168px] ${panel}`}
           >
             <div className="mb-2.5 flex items-center justify-between gap-2">
               <div>
@@ -664,29 +792,6 @@ export default function ExplorePage() {
                 )
               })}
             </div>
-
-            {/* Rover & Lander Sites overlay switch */}
-            <div className="mt-2.5 flex items-center justify-between border-t border-white/10 pt-2.5">
-              <div className="min-w-0">
-                <div className="text-xs font-semibold text-white">Rover & Lander Sites</div>
-                <div className="text-[10px] text-gray-400">Pin NASA surface missions on map</div>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={effectiveShowRovers}
-                onClick={() => setShowRovers((prev) => !prev)}
-                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
-                  effectiveShowRovers ? 'bg-red-500' : 'bg-white/15'
-                }`}
-              >
-                <span
-                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                    effectiveShowRovers ? 'translate-x-4' : 'translate-x-1'
-                  }`}
-                />
-              </button>
-            </div>
           </div>
         )}
 
@@ -721,6 +826,7 @@ export default function ExplorePage() {
 
         {/* Compact vertically centered right-edge pill tab when desktop drawer is collapsed */}
         <button
+          ref={openDrawerPillRef}
           type="button"
           onClick={() => setDesktopDrawerOpen(true)}
           title="Open Explore Mars panel"
@@ -732,13 +838,14 @@ export default function ExplorePage() {
           }`}
         >
           <ChevronLeft size={16} className="text-red-400" />
-          <MapPin size={14} className="text-red-400" />
+          <ModeIcon size={14} className="text-red-400" />
           <span className="max-w-[160px] truncate tracking-wide">{drawerTitle}</span>
         </button>
       </div>
 
       {/* Expandable Bottom Sheet on Mobile / Content-Fit Slide-Over Right Drawer on Desktop */}
       <aside
+        ref={sheetRef}
         className={`absolute inset-x-0 bottom-0 z-30 flex flex-col overflow-hidden rounded-t-3xl border-t border-white/15 bg-black/85 shadow-2xl backdrop-blur-xl transition-all duration-300 ease-out lg:bottom-auto lg:left-auto lg:right-4 lg:top-4 lg:h-auto lg:max-h-[calc(100%-2rem)] lg:w-[420px] lg:rounded-2xl lg:border lg:border-white/10 lg:bg-black/65 ${
           SHEET_HEIGHTS[sheetSnap]
         } ${
@@ -830,6 +937,7 @@ export default function ExplorePage() {
                     onClick={() => {
                       const loc = locations.find((l) => l.id === activeMission.locId)
                       if (loc) {
+                        setExploreMode('locations')
                         setActiveMissionId(null)
                         setMissionHistory([])
                         selectWithDetails(loc)
@@ -1073,10 +1181,10 @@ export default function ExplorePage() {
               <div className="hidden items-center justify-between gap-2 lg:mb-1.5 lg:flex">
                 <div className="flex items-baseline gap-2.5">
                   <h2 className="text-xl font-bold">
-                    {tab === 'Missions' ? 'NASA Missions' : 'Explore Mars'}
+                    {isMissionsMode ? 'NASA Missions' : 'Explore Mars'}
                   </h2>
                   <span className="font-mono text-xs tabular-nums text-gray-400">
-                    {tab === 'Missions'
+                    {isMissionsMode
                       ? `${MISSIONS.length} missions`
                       : `${locations.length} features`}
                   </span>
@@ -1092,33 +1200,12 @@ export default function ExplorePage() {
                 </button>
               </div>
               <p className="mb-3 text-xs text-gray-400 sm:text-sm">
-                {tab === 'Missions'
+                {isMissionsMode
                   ? 'Surface rovers, landers, and orbital spacecraft combined by landing site.'
-                  : 'Select a region, landform, feature, or NASA mission on the globe or below.'}
+                  : 'Select a region, landform, or feature on the globe or from the list below.'}
               </p>
 
-              {/* Category Tabs */}
-              <div className="mb-3 flex overflow-x-auto border-b border-white/10 [scrollbar-width:none]">
-                {tabs.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => {
-                      setTab(t)
-                      if (t === 'Missions') setShowRovers(true)
-                    }}
-                    className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-xs font-bold transition sm:text-sm ${
-                      tab === t
-                        ? 'border-red-500 text-white'
-                        : 'border-transparent text-gray-400 hover:text-gray-200'
-                    }`}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-
-              {tab === 'Missions' ? (
+              {isMissionsMode ? (
                 /* Missions Filter + List */
                 <div>
                   <div className="mb-3 flex flex-wrap gap-1.5">
@@ -1162,8 +1249,25 @@ export default function ExplorePage() {
                   </div>
                 </div>
               ) : (
-                /* Locations List */
-                <div className="divide-y divide-white/10">
+                /* Locations Category Tabs + List */
+                <>
+                  <div className="mb-3 flex overflow-x-auto border-b border-white/10 [scrollbar-width:none]">
+                    {tabs.map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setTab(t)}
+                        className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-xs font-bold transition sm:text-sm ${
+                          tab === t
+                            ? 'border-red-500 text-white'
+                            : 'border-transparent text-gray-400 hover:text-gray-200'
+                        }`}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="divide-y divide-white/10">
                   {filteredList.map((loc) => (
                     <button
                       key={loc.id}
@@ -1190,7 +1294,8 @@ export default function ExplorePage() {
                       <ChevronRight size={18} className="shrink-0 text-gray-400" />
                     </button>
                   ))}
-                </div>
+                  </div>
+                </>
               )}
             </div>
           )}

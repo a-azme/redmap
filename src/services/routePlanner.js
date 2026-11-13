@@ -105,8 +105,9 @@ export async function planRouteAsync(start, end, settings) {
   }
 }
 
-const tick = () => new Promise((r) => setTimeout(r, 0)) // let the page paint and respond between planning steps
+const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms)) // let the page paint and respond between planning steps
 const CACHE = new Map()
+const MODE_CACHE = new Map()
 const cacheKey = (start, end, s) =>
   [
     start.id,
@@ -128,48 +129,72 @@ const cacheKey = (start, end, s) =>
  */
 export async function planAllModes(start, end, settings, { onUpdate, cancelled = () => false } = {}) {
   if (!start || !end || start.id === end.id) return null
+  const activeMode = MODES[settings.mode] ? settings.mode : 'scientific'
   const key = cacheKey(start, end, settings)
   if (CACHE.has(key)) {
     const hit = CACHE.get(key)
-    const result = { primary: hit.alternatives[settings.mode], alternatives: hit.alternatives }
-    onUpdate?.({ ...result, done: true })
-    return result
+    const primary = hit.alternatives[activeMode] || Object.values(hit.alternatives)[0]
+    if (primary && !primary.error) {
+      const result = { primary, alternatives: hit.alternatives }
+      onUpdate?.({ ...result, done: true })
+      return result
+    }
   }
   const modes = Object.keys(MODES)
   const t0 = Date.now()
-  const order = [settings.mode, ...modes.filter((m) => m !== settings.mode)]
+  const order = [activeMode, ...modes.filter((m) => m !== activeMode)]
   const alternatives = {}
   const plan = async (mode) => {
-    try { alternatives[mode] = await planRouteAsync(start, end, { ...settings, mode }) } catch (e) { alternatives[mode] = { error: e.message } }
+    const mKey = `${key}|${mode}`
+    if (MODE_CACHE.has(mKey)) {
+      alternatives[mode] = MODE_CACHE.get(mKey)
+      return
+    }
+    try {
+      const r = await planRouteAsync(start, end, { ...settings, mode })
+      alternatives[mode] = r
+      if (r && !r.error && r.dataSource?.real !== false) {
+        MODE_CACHE.set(mKey, r)
+        if (MODE_CACHE.size > 24) MODE_CACHE.delete(MODE_CACHE.keys().next().value)
+      }
+    } catch (e) {
+      alternatives[mode] = { error: e.message }
+    }
   }
-  const push = (done = false) => onUpdate?.({ primary: alternatives[settings.mode], alternatives: { ...alternatives }, done })
+  const push = (done = false) =>
+    onUpdate?.({ primary: alternatives[activeMode], alternatives: { ...alternatives }, done })
 
   // 1. the selected mode first, so something appears right away
-  await plan(settings.mode)
+  await plan(activeMode)
   console.info(`[RedMap] first route on screen after ${Date.now() - t0} ms`)
-  if (alternatives[settings.mode]?.error) throw new RouteError('blocked', alternatives[settings.mode].error)
+  if (alternatives[activeMode]?.error) throw new RouteError('blocked', alternatives[activeMode].error)
   if (cancelled()) return null
   push()
 
+  // Yield briefly so OpenSeadragon can smoothly pan/zoom and paint sector tiles before background modes run
+  await tick(50)
+  if (cancelled()) return null
+
   // 2. the other modes
   for (const m of order.slice(1)) {
-    await tick()
+    await tick(16)
     if (cancelled()) return null
     await plan(m)
   }
   push()
 
-  // 3. refine each mode against its own goal (see lib/balanced.js), only where it can help
+  // 3. refine each mode against its own goal (see lib/balanced.js), only where it can help on regional routes
   const good = (m) => (alternatives[m] && !alternatives[m].error && alternatives[m].dataSource?.real !== false ? alternatives[m] : null)
   const planAt = (mode, from) => (t) => planRouteAsync(start, end, { ...settings, mode, blend: t, blendFrom: from })
   const plain = { fastest: good('fastest'), safest: good('safest'), scientific: good('scientific') }
   const seedsFor = { fastest: [plain.fastest], safest: [plain.safest, plain.fastest], scientific: [plain.scientific] }
   for (const mode of order) {
-    await tick()
+    if (!plain[mode] || plain[mode].distanceKm < 35) continue
+    await tick(16)
     if (cancelled()) return null
     // a long trip: re-plan the active selected mode in hops on fine grids, so craters and rims the overview grid cannot see are avoided
     if (plain[mode] && plain[mode].distanceKm > HOP_MIN_TRIP_KM) {
-      if (mode !== settings.mode) continue
+      if (mode !== activeMode) continue
       try {
         const hopped = await planRouteAsync(start, end, { ...settings, mode, hops: true })
         if (cancelled()) return null
@@ -177,7 +202,7 @@ export async function planAllModes(start, end, settings, { onUpdate, cancelled =
       } catch { /* keep the overview route */ }
       continue
     }
-    if (!plain[mode] || !needsRefining(mode, plain[mode], plain)) continue
+    if (!needsRefining(mode, plain[mode], plain)) continue
     try {
       const seeds = seedsFor[mode].filter(Boolean)
       const g = goalFor(mode, seeds)
@@ -191,10 +216,10 @@ export async function planAllModes(start, end, settings, { onUpdate, cancelled =
     } catch { /* keep the plain route */ }
   }
 
-  const result = { primary: alternatives[settings.mode], alternatives }
+  const result = { primary: alternatives[activeMode], alternatives }
   if (result.primary?.dataSource?.real !== false) {
     CACHE.set(key, { alternatives })
-    if (CACHE.size > 8) CACHE.delete(CACHE.keys().next().value)
+    if (CACHE.size > 12) CACHE.delete(CACHE.keys().next().value)
   }
   console.info(`[RedMap] all modes planned in ${Date.now() - t0} ms`)
   push(true)

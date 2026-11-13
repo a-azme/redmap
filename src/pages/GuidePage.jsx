@@ -315,7 +315,7 @@ export default function GuidePage() {
                     Global Dust Storm Season (Ls 180°–330°)
                   </h3>
                   <p className="mt-1.5 text-xs leading-relaxed text-gray-300">
-                    During southern spring and summer (perihelion), atmospheric optical depth ($\tau$) can surge from $\tau \approx 0.4$ to $\tau &gt; 4.0$, cutting solar array generation by over 80%, obscuring horizon landmarks needed for visual navigation, and coating suit thermal radiators and seals with electrostatic micron-scale dust.
+                    During southern spring and summer (perihelion), atmospheric optical depth (τ) can surge from τ ≈ 0.4 to τ &gt; 4.0, cutting solar array generation by over 80%, obscuring horizon landmarks needed for visual navigation, and coating suit thermal radiators and seals with electrostatic micron-scale dust.
                   </p>
                 </div>
               </div>
@@ -337,7 +337,7 @@ export default function GuidePage() {
                     MGS MOLA · 463 m/px Calibrated DEM
                   </div>
                   <p className="mt-1 text-xs text-gray-300">
-                    Mars Orbiter Laser Altimeter elevation model calibrated against 12 benchmark landing sites ($R^2 = 0.999$) to compute real elevation gain, slope angle, terrain roughness, and enclosed basin hazards.
+                    Mars Orbiter Laser Altimeter elevation model calibrated against 12 benchmark landing sites (R² = 0.999) to compute real elevation gain, slope angle, terrain roughness, and enclosed basin hazards.
                   </p>
                 </div>
 

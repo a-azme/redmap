@@ -1,10 +1,7 @@
-import { useEffect, useState } from 'react'
-import { Link, NavLink } from 'react-router-dom'
-import { BookOpen, Clock, Globe, Radio, Route } from 'lucide-react'
+import { NavLink } from 'react-router-dom'
+import { BookOpen, Globe, Route } from 'lucide-react'
 import SearchBar from './SearchBar'
 import RedMapLogo from '../ui/RedMapLogo'
-import { coordinatedMarsTime } from '../../lib/marsTime'
-import { commsDelay } from '../../lib/commsDelay'
 
 const tabs = [
   { to: '/', label: 'Explore', icon: Globe },
@@ -13,16 +10,6 @@ const tabs = [
 ]
 
 export default function Navbar() {
-  const [now, setNow] = useState(() => new Date())
-
-  useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 1000)
-    return () => clearInterval(timer)
-  }, [])
-
-  const mtc = coordinatedMarsTime(now)
-  const comms = commsDelay(now)
-
   return (
     <header className="z-20 flex shrink-0 flex-wrap items-center justify-between border-b border-line bg-panel px-3 xl:h-[72px] xl:flex-nowrap xl:px-6">
       <div className="flex h-14 items-center gap-4 xl:h-auto">
@@ -52,21 +39,8 @@ export default function Navbar() {
         ))}
       </nav>
 
-      <div className="flex h-14 items-center gap-2.5 xl:h-auto">
+      <div className="flex h-14 items-center xl:h-auto">
         <SearchBar />
-        <Link
-          to="/guide"
-          title="Live Coordinated Mars Time & Earth-Mars One-Way Light Delay"
-          className="hidden items-center gap-2 rounded-xl border border-line bg-panel-2 px-3 py-2 text-xs text-gray-200 transition hover:border-red-500/50 hover:text-white md:flex"
-        >
-          <Clock size={14} className="shrink-0 text-red-400" />
-          <span className="font-mono tabular-nums">MTC {mtc.mtcClock}</span>
-          <span className="hidden text-white/30 lg:inline">·</span>
-          <span className="hidden items-center gap-1 font-mono text-[11px] tabular-nums text-amber-300 lg:inline-flex">
-            <Radio size={12} />
-            {comms.oneWayMin}m
-          </span>
-        </Link>
       </div>
     </header>
   )

@@ -61,7 +61,7 @@ export default function StreetViewPovCard({
         <div className="rm-streetcard__top">
           <span className="rm-streetcard__badge">
             <Compass size={12} />
-            <span>360° Surface View · {pov.nasaId}</span>
+            <span>360° View · {pov.nasaId}</span>
           </span>
           <span className="rm-streetcard__expand" aria-hidden="true">
             <Maximize2 size={12} />

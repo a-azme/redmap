@@ -151,8 +151,10 @@ export function finalizeRoute({ start, end, settings, points, distanceKm, stops 
   // ---- risk score 0–100 ----
   const steepShare = points.filter((p) => p.slopeDeg > settings.maxSlopeDeg).length / points.length
   const critical = warnings.filter((w) => w.severity === 'critical').length
+  const gradePoints = Math.min(16, +(maxSlopeDeg * 0.55 + avgSlopeDeg * 0.7).toFixed(1))
   const parts = [
     { key: 'steep', label: 'Slopes over your limit', points: steepShare * 120, detail: `${Math.round(steepShare * 100)}% of the route is steeper than ${settings.maxSlopeDeg}°`, tip: 'Lower the max slope, or pick Safest mode.' },
+    { key: 'grade', label: 'Slope & grade exposure', points: gradePoints, detail: `up to ${maxSlopeDeg.toFixed(1)}° (${avgSlopeDeg.toFixed(1)}° avg grade)`, tip: 'Pick Safest mode to contour around steeper scarps and ridges.' },
     { key: 'critical', label: 'Critical warnings', points: critical * 8, detail: `${critical} critical warning${critical === 1 ? '' : 's'}`, tip: 'Open the warnings list and fix the red ones first (a different mode or destination often clears them).' },
     { key: 'time', label: 'Time on the surface', points: Math.min(sols, 60) * 0.5, detail: `${sols} sol${sols === 1 ? '' : 's'} outside`, tip: 'Raise EVA hours per sol or choose a closer destination.' },
     { key: 'cold', label: 'Extreme cold', points: minTempC < -75 ? 8 : 0, detail: minTempC < -75 ? `down to ${minTempC}°C` : 'within suit limits', tip: 'Travel at lower latitude or elevation, or in the warm part of the sol.' },

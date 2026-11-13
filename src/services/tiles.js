@@ -60,8 +60,12 @@ const THERMAL_LUT = (() => {
   const lut = new Uint8Array(256 * 4)
   for (let v = 0; v < 256; v++) {
     const base = v * 4
-    if (v < 8) {
-      lut[base + 3] = 0
+    if (v === 0) {
+      // Polar caps (>65°N/S) and unmapped orbital edges use opaque deep cold indigo so terrain never bleeds through
+      lut[base] = 18
+      lut[base + 1] = 24
+      lut[base + 2] = 78
+      lut[base + 3] = 255
       continue
     }
     const p = (v / 255) * (RAMP.length - 1)
@@ -76,22 +80,33 @@ const THERMAL_LUT = (() => {
   return lut
 })()
 
-export function colorizeImage(img) {
+const THERMAL_LUT_32 = new Uint32Array(THERMAL_LUT.buffer)
+const COLORIZED_TILE_CACHE = new Map()
+const MAX_COLORIZED_CACHE = 72
+
+export function colorizeImage(img, cacheKey) {
+  if (cacheKey && COLORIZED_TILE_CACHE.has(cacheKey)) {
+    return COLORIZED_TILE_CACHE.get(cacheKey)
+  }
   const c = document.createElement('canvas')
-  c.width = img.width
-  c.height = img.height
+  c.width = img.width || 256
+  c.height = img.height || 256
   const ctx = c.getContext('2d', { willReadFrequently: true })
   ctx.drawImage(img, 0, 0)
   const d = ctx.getImageData(0, 0, c.width, c.height)
   const data = d.data
-  for (let i = 0; i < data.length; i += 4) {
-    const lutIdx = data[i] * 4
-    data[i] = THERMAL_LUT[lutIdx]
-    data[i + 1] = THERMAL_LUT[lutIdx + 1]
-    data[i + 2] = THERMAL_LUT[lutIdx + 2]
-    data[i + 3] = THERMAL_LUT[lutIdx + 3]
+  const pixels32 = new Uint32Array(data.buffer, data.byteOffset, data.byteLength >> 2)
+  for (let p = 0, n = pixels32.length; p < n; p++) {
+    pixels32[p] = THERMAL_LUT_32[data[p << 2]]
   }
   ctx.putImageData(d, 0, 0)
+  if (cacheKey) {
+    if (COLORIZED_TILE_CACHE.size >= MAX_COLORIZED_CACHE) {
+      const oldest = COLORIZED_TILE_CACHE.keys().next().value
+      COLORIZED_TILE_CACHE.delete(oldest)
+    }
+    COLORIZED_TILE_CACHE.set(cacheKey, c)
+  }
   return c
 }
 
@@ -202,8 +217,8 @@ export function preloadFallbackTexture() {
 preloadFallbackTexture()
 
 /**
- * Ensures the lightweight local Mars texture stays permanently at index 0 of imageryLayers
- * as a zero-overhead underlayer so the globe never flashes blank while NASA tiles stream in.
+ * Ensures the lightweight local Mars texture stays at index 0 of imageryLayers
+ * as a zero-overhead underlayer for natural terrain mode.
  */
 export async function ensureFallbackLayer(viewer) {
   if (!viewer || viewer.isDestroyed()) return null
@@ -236,13 +251,16 @@ function removeNonFallbackLayers(viewer) {
 }
 
 /**
- * Finds a working NASA tile source for a layer config and puts it on the viewer
- * while preserving the permanent local Mars underlayer at index 0.
+ * Finds a working NASA tile source for a layer config and puts it on the viewer.
+ * Hides the local fallback terrain layer when a non-terrain data layer is active so
+ * terrain and spectral/thermal layers never visually merge.
  * cb = { cancelled: () => bool, onStatus: (s) => void, onSource: (name) => void }
  */
 export function applyLayer(viewer, cfg, key, cb) {
   let disposed = false
   const isCancelled = () => disposed || cb.cancelled() || viewer.isDestroyed()
+  const isTerrainLayer = key === 'terrain' || key === 'missions'
+  const isThermalLayer = key === 'temp' || key === 'temperature'
 
   const overlayLayers = []
   const FADE_FULL = 3e5
@@ -266,8 +284,16 @@ export function applyLayer(viewer, cfg, key, cb) {
   viewer.scene.preRender.addEventListener(fadeOverlays)
 
   ;(async () => {
-    await ensureFallbackLayer(viewer)
+    const fallback = await ensureFallbackLayer(viewer)
     if (isCancelled()) return
+
+    // Hide fallback terrain underlayer when switching to non-terrain scientific layers
+    if (fallback) {
+      fallback.show = isTerrainLayer
+    }
+    viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString(
+      isTerrainLayer ? '#2a1208' : isThermalLayer ? '#12184e' : '#0b0e17'
+    )
 
     let chosen = null
     let ext = null
@@ -279,16 +305,17 @@ export function applyLayer(viewer, cfg, key, cb) {
 
     if (!chosen) {
       console.warn('[RedMap] No working tile source for layer:', key, '– using local texture fallback')
-      const fallback = await ensureFallbackLayer(viewer)
       if (isCancelled()) return
       removeNonFallbackLayers(viewer)
-      viewer.scene.requestRender()
       if (fallback) {
+        fallback.show = true
+        viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#2a1208')
         cb.onSource('Local Mars Texture')
         cb.onStatus('ok')
       } else {
         cb.onStatus('error')
       }
+      viewer.scene.requestRender()
       return
     }
     cb.onSource(chosen.name)
@@ -297,7 +324,10 @@ export function applyLayer(viewer, cfg, key, cb) {
     const orig = base.requestImage.bind(base)
     base.requestImage = (x, y, level, request) => {
       let p = orig(x, y, level, request)
-      if (p && p.then && chosen.colorize) p = p.then(colorizeImage)
+      if (p && p.then && chosen.colorize) {
+        const cKey = level <= 3 ? `${key}:${level}:${y}:${x}` : null
+        p = p.then((img) => colorizeImage(img, cKey))
+      }
       if (p && p.then) {
         p.then(() => {
           if (!isCancelled()) {

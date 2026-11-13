@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import {
   ChevronRight,
   ChevronLeft,
@@ -70,8 +71,22 @@ const SHEET_HEIGHTS = {
   full: 'h-[86%]',
 }
 
-function detectSectorForRoute(startId, endId, fallback = 'gale') {
+function detectSectorForRoute(startOrId, endOrId, fallback = 'gale') {
+  const sObj = startOrId && typeof startOrId === 'object' ? startOrId : null
+  const eObj = endOrId && typeof endOrId === 'object' ? endOrId : null
+  if (sObj && typeof sObj.lat === 'number') {
+    return sObj.lat > 5 ? 'jezero' : 'gale'
+  }
+  if (eObj && typeof eObj.lat === 'number') {
+    return eObj.lat > 5 ? 'jezero' : 'gale'
+  }
+  const startId = sObj ? sObj.id : startOrId
+  const endId = eObj ? eObj.id : endOrId
   if (!startId && !endId) return fallback
+  const s = String(startId || '')
+  const e = String(endId || '')
+  if (s.includes('jezero') || e.includes('jezero')) return 'jezero'
+  if (s.includes('gale') || e.includes('gale')) return 'gale'
   const jezIds = new Set(['jezero', 'butler', 'delta', 'neretva', 'nili'])
   if (jezIds.has(startId) || jezIds.has(endId)) return 'jezero'
   const galeIds = new Set(['gale', 'gediz', 'boxwork', 'bradbury', 'yellowknife', 'sulfate'])
@@ -80,8 +95,11 @@ function detectSectorForRoute(startId, endId, fallback = 'gale') {
 }
 
 export default function RoutePlannerPage() {
+  const routerLocation = useLocation()
   const [route, setRoute] = useState(null)
-  const [preferredSector, setPreferredSector] = useState('gale')
+  const [preferredSector, setPreferredSector] = useState(() =>
+    detectSectorForRoute(routerLocation.state?.targetLocation, null, 'gale')
+  )
   const [sectorPreset, setSectorPreset] = useState(null)
   const [selected, setSelected] = useState([])
   const [hazard, setHazard] = useState('off') // 'off' | 'slope' | 'low' | 'keep'
@@ -89,7 +107,7 @@ export default function RoutePlannerPage() {
   const [layersOpen, setLayersOpen] = useState(false)
   const [focus, setFocus] = useState(false)
 
-  // Desktop slide-over right sidebar state (matches ExplorePage & MissionsPage)
+  // Desktop slide-over right sidebar state (matches ExplorePage & MissionsPage: explicit collapse via header button)
   const [drawerTab, setDrawerTab] = useState('eva') // 'eva' | 'hazards' | 'science'
   const [desktopDrawerOpen, setDesktopDrawerOpen] = useState(true)
 
@@ -125,27 +143,38 @@ export default function RoutePlannerPage() {
   const [scrubIndex, setScrubIndex] = useState(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [playSpeed, setPlaySpeed] = useState(1)
+  const [customStart, setCustomStart] = useState(null)
+  const [customDest, setCustomDest] = useState(null)
+  const [pendingEndpoints, setPendingEndpoints] = useState(null)
   const [customWaypoints, setCustomWaypoints] = useState([])
-  const [addWaypointMode, setAddWaypointMode] = useState(false)
+  // Unified map picker state: null | 'start' | 'dest' | 'detour'
+  const [mapPickMode, setMapPickMode] = useState(null)
 
   const seqRef = useRef(0)
   const desktopScrollRef = useRef(null)
   const mobileScrollRef = useRef(null)
   const touchStartYRef = useRef(null)
+  const layersBtnRef = useRef(null)
+  const layersPopoverRef = useRef(null)
+  const desktopDrawerRef = useRef(null)
+  const mobileSheetRef = useRef(null)
+  const openDrawerPillRef = useRef(null)
 
-  const routeStartId = route?.start?.id
-  const routeEndId = route?.end?.id
-  const routePoints = route?.points
-  const routeStart = route?.start
-  const routeEnd = route?.end
-  const routeStops = route?.stops
-  const routeShelterPoint = route?.shelterPoint
-  const routeDistanceKm = route?.distanceKm
+  const sectorKey = preferredSector === 'jezero' ? 'jezero' : 'gale'
 
-  const sectorKey = useMemo(
-    () => detectSectorForRoute(routeStartId, routeEndId, preferredSector),
-    [routeStartId, routeEndId, preferredSector]
-  )
+  // Never pass a stale route from another sector into RouteMap or child cards while switching sectors
+  const activeRoute = useMemo(() => {
+    if (!route) return null
+    const rSec = detectSectorForRoute(route.start, route.end, sectorKey)
+    return rSec === sectorKey ? route : null
+  }, [route, sectorKey])
+
+  const routePoints = activeRoute?.points
+  const routeStart = activeRoute?.start
+  const routeEnd = activeRoute?.end
+  const routeStops = activeRoute?.stops
+  const routeShelterPoint = activeRoute?.shelterPoint
+  const routeDistanceKm = activeRoute?.distanceKm
 
   useEffect(() => {
     let cancelled = false
@@ -157,7 +186,42 @@ export default function RoutePlannerPage() {
     }
   }, [])
 
-  // Allow Escape key to close 360° modal, Layers popover, exit detour waypoint mode, exit full-map focus, or collapse desktop right sidebar
+  // Dismiss floating Layers card on outside tap, and collapse mobile bottom sheet on outside tap (desktop right sidebar has explicit collapse button)
+  useEffect(() => {
+    const onPointerDown = (e) => {
+      const target = e.target
+      if (!target) return
+
+      if (layersOpen) {
+        const inLayersCard = layersPopoverRef.current?.contains(target)
+        const inLayersBtn = layersBtnRef.current?.contains(target)
+        if (!inLayersCard && !inLayersBtn) {
+          setLayersOpen(false)
+        }
+      }
+
+      if (!isDesktop && sheetSnap !== 'peek') {
+        const inMobileSheet = mobileSheetRef.current?.contains(target)
+        const inLayersCard = layersPopoverRef.current?.contains(target)
+        const inLayersBtn = layersBtnRef.current?.contains(target)
+        const inMapMarker = Boolean(target.closest?.('.rm-osd-marker'))
+        const inModal = Boolean(target.closest?.('.rm-psv-modal'))
+        if (
+          !inMobileSheet &&
+          !inLayersCard &&
+          !inLayersBtn &&
+          !inMapMarker &&
+          !inModal
+        ) {
+          setSheetSnap('peek')
+        }
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => document.removeEventListener('pointerdown', onPointerDown, true)
+  }, [layersOpen, isDesktop, sheetSnap])
+
+  // Allow Escape key to close 360° modal, Layers popover, exit map pick mode, exit full-map focus, or collapse right sidebar / mobile sheet
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape') {
@@ -165,18 +229,19 @@ export default function RoutePlannerPage() {
           setPhotoSphereState({ open: false, visor: false })
         } else if (layersOpen) {
           setLayersOpen(false)
-        } else if (addWaypointMode) {
-          setAddWaypointMode(false)
+        } else if (mapPickMode) {
+          setMapPickMode(null)
         } else if (focus) {
           setFocus(false)
-        } else if (desktopDrawerOpen) {
+        } else if (desktopDrawerOpen || sheetSnap !== 'peek') {
           setDesktopDrawerOpen(false)
+          setSheetSnap('peek')
         }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [focus, photoSphereState.open, layersOpen, addWaypointMode, desktopDrawerOpen])
+  }, [focus, photoSphereState.open, layersOpen, mapPickMode, desktopDrawerOpen, sheetSnap])
 
   const spaceWeather = useMemo(
     () => resolveSpaceWeather('live', liveWeather),
@@ -184,15 +249,15 @@ export default function RoutePlannerPage() {
   )
 
   const plan = useMemo(() => {
-    if (!route) return null
+    if (!activeRoute) return null
     const d = new Date(`${evaDate}T00:00:00Z`)
-    return planEva(route, {
+    return planEva(activeRoute, {
       date: Number.isNaN(d.getTime()) ? new Date() : d,
       travel,
       selectedStopIds: selected,
       spaceWeather,
     })
-  }, [route, evaDate, travel, selected, spaceWeather])
+  }, [activeRoute, evaDate, travel, selected, spaceWeather])
 
   const reconStops = useMemo(
     () =>
@@ -245,10 +310,10 @@ export default function RoutePlannerPage() {
   }, [routePoints, scrubIndex])
 
   const handleTogglePlay = () => {
-    if (!route?.points?.length) return
+    if (!activeRoute?.points?.length) return
     setIsPlaying((prev) => {
       const next = !prev
-      if (next && (scrubIndex === null || scrubIndex >= route.points.length - 1)) {
+      if (next && (scrubIndex === null || scrubIndex >= activeRoute.points.length - 1)) {
         setScrubIndex(0)
         setReconIndex(0)
       }
@@ -286,7 +351,9 @@ export default function RoutePlannerPage() {
   }
 
   const handleMapPointClick = (entId) => {
-    if (!reconStops.length) return
+    if (!entId) return
+    setDesktopDrawerOpen(true)
+    setSheetSnap((prev) => (prev === 'peek' ? 'half' : prev))
     let idx = -1
     if (entId === 'start') idx = 0
     else if (entId === 'end') idx = reconStops.length - 1
@@ -294,66 +361,134 @@ export default function RoutePlannerPage() {
     else if (entId.startsWith('s-')) {
       const stopId = entId.slice(2)
       idx = reconStops.findIndex((s) => s.id === stopId)
-    } else if (entId.startsWith('wp-')) {
-      const n = Number(entId.slice(3))
-      const wp = route?.waypoints?.find((w) => w.n === n)
-      if (wp) {
-        idx = reconStops.findIndex(
-          (s) => Math.abs(s.lat - wp.lat) < 0.05 && Math.abs(s.lon - wp.lon) < 0.05
-        )
-        if (idx === -1) {
+      if (idx === -1) {
+        const cStop = (activeRoute?.corridorStops || []).find((s) => s.id === stopId)
+        if (cStop) {
           seqRef.current += 1
-          setFlyTarget({ lat: wp.lat, lon: wp.lon, seq: seqRef.current })
+          setFlyTarget({ lat: cStop.lat, lon: cStop.lon, seq: seqRef.current })
           return
         }
       }
+    } else if (entId.startsWith('cwp-')) {
+      const cw = customWaypoints.find((w) => w.id === entId)
+      if (cw) {
+        seqRef.current += 1
+        setFlyTarget({ lat: cw.lat, lon: cw.lon, seq: seqRef.current })
+        return
+      }
+    } else if (entId.startsWith('w-')) {
+      const warnId = entId.slice(2)
+      const warn = (activeRoute?.warnings || []).find((w) => w.id === warnId)
+      if (warn && typeof warn.lat === 'number' && typeof warn.lon === 'number') {
+        seqRef.current += 1
+        setFlyTarget({ lat: warn.lat, lon: warn.lon, seq: seqRef.current })
+        return
+      }
     }
-    if (idx !== -1) {
+    if (idx !== -1 && reconStops.length) {
       handleSelectReconIndex(idx)
     }
   }
 
   const handleSectorSwitch = (sec) => {
+    if (!sec || sec.id === sectorKey) return
+    setLayersOpen(false)
     setPreferredSector(sec.id)
+    setRoute(null)
+    setSelected([])
+    setReconIndex(0)
+    setFlyTarget(null)
+    setIsPlaying(false)
+    setScrubIndex(null)
+    setCustomStart(null)
+    setCustomDest(null)
+    setPendingEndpoints(null)
     setCustomWaypoints([])
-    setAddWaypointMode(false)
+    setMapPickMode(null)
     seqRef.current += 1
     setSectorPreset({
       startId: sec.startId,
       destId: sec.destId,
-      mode: 'safe',
+      mode: 'scientific',
       payloadKg: 20,
       seq: seqRef.current,
     })
   }
 
-  const handleAddCustomWaypoint = ({ lat, lon }) => {
-    setCustomWaypoints((prev) => {
-      if (prev.length >= 4) return prev
-      const idx = prev.length + 1
-      return [
-        ...prev,
-        {
-          id: `cwp-${Date.now()}-${idx}`,
-          name: `Detour WP ${idx}`,
-          lat: +lat.toFixed(4),
-          lon: +((lon % 360 + 360) % 360).toFixed(4),
-        },
-      ]
+  const handleSelectPickMode = (nextMode) => {
+    setMapPickMode((cur) => {
+      const resolved = cur === nextMode ? null : nextMode
+      if (resolved && !isDesktop) {
+        setSheetSnap('peek')
+      }
+      return resolved
     })
+  }
+
+  const handleMapPickPoint = ({ lat, lon }) => {
+    const cleanLat = +lat.toFixed(4)
+    const cleanLon = +(((lon % 360) + 360) % 360).toFixed(4)
+
+    if (mapPickMode === 'start') {
+      setCustomStart({
+        id: `custom-start-${sectorKey}-${cleanLat}-${cleanLon}`,
+        name: 'Start',
+        lat: cleanLat,
+        lon: cleanLon,
+        isCustom: true,
+        sector: sectorKey,
+      })
+      setMapPickMode(null)
+      return
+    }
+
+    if (mapPickMode === 'dest') {
+      setCustomDest({
+        id: `custom-dest-${sectorKey}-${cleanLat}-${cleanLon}`,
+        name: 'Destination',
+        lat: cleanLat,
+        lon: cleanLon,
+        isCustom: true,
+        sector: sectorKey,
+      })
+      setMapPickMode(null)
+      return
+    }
+
+    if (mapPickMode === 'detour') {
+      setCustomWaypoints((prev) => {
+        if (prev.length >= 4) return prev
+        const idx = prev.length + 1
+        const next = [
+          ...prev,
+          {
+            id: `cwp-${Date.now()}-${idx}`,
+            name: `Detour Stop ${idx}`,
+            lat: cleanLat,
+            lon: cleanLon,
+          },
+        ]
+        if (next.length >= 4) {
+          setMapPickMode(null)
+        }
+        return next
+      })
+    }
   }
 
   const handleRemoveCustomWaypoint = (id) => {
     setCustomWaypoints((prev) =>
       prev
         .filter((w) => w.id !== id)
-        .map((w, idx) => ({ ...w, name: `Detour WP ${idx + 1}` }))
+        .map((w, idx) => ({ ...w, name: `Detour Stop ${idx + 1}` }))
     )
   }
 
   const handleClearCustomWaypoints = () => {
     setCustomWaypoints([])
-    setAddWaypointMode(false)
+    if (mapPickMode === 'detour') {
+      setMapPickMode(null)
+    }
   }
 
   const handleLocateStop = (stop) => {
@@ -453,7 +588,8 @@ export default function RoutePlannerPage() {
       {/* Full-Viewport 2D Deep-Zoom Map on both Mobile and Desktop */}
       <div className="rm-mapwrap absolute inset-0">
         <RouteMap
-          route={route}
+          route={activeRoute}
+          pendingEndpoints={pendingEndpoints}
           sectorKey={sectorKey}
           hazard={hazard}
           layer={layer}
@@ -462,9 +598,10 @@ export default function RoutePlannerPage() {
           activePoint={flyTarget}
           scrubPoint={scrubPoint}
           onSelectPoint={handleMapPointClick}
-          addWaypointMode={addWaypointMode}
-          onToggleAddWaypointMode={() => setAddWaypointMode((m) => !m)}
-          onMapAddWaypoint={handleAddCustomWaypoint}
+          customWaypoints={customWaypoints}
+          mapPickMode={mapPickMode}
+          onExitPickMode={() => setMapPickMode(null)}
+          onMapPickPoint={handleMapPickPoint}
         />
       </div>
 
@@ -475,27 +612,36 @@ export default function RoutePlannerPage() {
         }`}
       >
         <button
+          ref={layersBtnRef}
           type="button"
-          onClick={() => setLayersOpen((prev) => !prev)}
+          onClick={(e) => {
+            e.currentTarget.blur()
+            setLayersOpen((prev) => !prev)
+          }}
           title="Map Layers"
           aria-label="Map Layers"
+          aria-expanded={layersOpen}
           className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border shadow-xl backdrop-blur-md transition ${
-            layersOpen || layer !== 'terrain'
-              ? 'border-red-500/60 bg-red-500/20 text-red-300'
-              : 'border-white/12 bg-black/75 text-gray-200 hover:border-white/25 hover:bg-black/90 hover:text-white'
+            layersOpen
+              ? 'border-[#ff6b57] bg-[#e23b2e]/85 text-white'
+              : 'border-white/12 bg-black/75 text-gray-200 [@media(hover:hover)]:hover:border-white/25 [@media(hover:hover)]:hover:bg-black/90 [@media(hover:hover)]:hover:text-white active:scale-95 active:border-[#ff6b57] active:bg-[#e23b2e]/85 active:text-white'
           }`}
         >
-          <Layers size={16} className="text-red-400" />
+          <Layers size={16} className={layersOpen ? 'text-white' : 'text-red-400'} />
         </button>
 
         <button
           type="button"
-          onClick={() => setFocus((f) => !f)}
+          onClick={(e) => {
+            e.currentTarget.blur()
+            setLayersOpen(false)
+            setFocus((f) => !f)
+          }}
           title={focus ? 'Return to Planner Console (Esc)' : 'Expand 2D map to full screen'}
           className={`hidden xl:inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-semibold shadow-xl backdrop-blur-md transition ${
             focus
-              ? 'border-red-500/60 bg-red-500/25 text-white'
-              : 'border-white/12 bg-black/75 text-gray-300 hover:border-white/25 hover:bg-black/90 hover:text-white'
+              ? 'border-[#ff6b57] bg-[#e23b2e]/85 text-white'
+              : 'border-white/12 bg-black/75 text-gray-300 [@media(hover:hover)]:hover:border-white/25 [@media(hover:hover)]:hover:bg-black/90 [@media(hover:hover)]:hover:text-white active:scale-95 active:border-[#ff6b57] active:bg-[#e23b2e]/85 active:text-white'
           }`}
         >
           {focus ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
@@ -505,6 +651,7 @@ export default function RoutePlannerPage() {
 
       {layersOpen && (
         <div
+          ref={layersPopoverRef}
           className={`absolute left-2.5 top-[48px] z-30 w-[280px] rounded-2xl border border-white/12 bg-black/85 p-3 shadow-2xl backdrop-blur-xl sm:w-[300px] ${
             focus ? 'xl:left-4 xl:top-[52px]' : 'xl:left-[328px] xl:top-[52px]'
           }`}
@@ -520,7 +667,7 @@ export default function RoutePlannerPage() {
               type="button"
               onClick={() => setLayersOpen(false)}
               aria-label="Close Map Layers"
-              className="flex h-6 w-6 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-gray-400 transition hover:bg-white/10 hover:text-white"
+              className="flex h-6 w-6 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-gray-400 transition [@media(hover:hover)]:hover:bg-white/10 [@media(hover:hover)]:hover:text-white active:bg-[#e23b2e]/80 active:text-white"
             >
               <X size={13} />
             </button>
@@ -534,14 +681,15 @@ export default function RoutePlannerPage() {
                 <button
                   key={l.id}
                   type="button"
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.currentTarget.blur()
                     setLayer(l.id)
                     setLayersOpen(false)
                   }}
                   className={`group overflow-hidden rounded-xl border text-left transition ${
                     isSelected
                       ? 'border-red-500 bg-red-500/10 ring-1 ring-red-500/40'
-                      : 'border-white/10 bg-white/[0.03] hover:border-white/25'
+                      : 'border-white/10 bg-white/[0.03] [@media(hover:hover)]:hover:border-white/25 active:border-[#ff6b57]'
                   }`}
                 >
                   <LayerThumb layerId={l.id} grad={l.grad} className="h-[44px]" />
@@ -571,11 +719,14 @@ export default function RoutePlannerPage() {
               <button
                 key={sec.id}
                 type="button"
-                onClick={() => handleSectorSwitch(sec)}
+                onClick={(e) => {
+                  e.currentTarget.blur()
+                  handleSectorSwitch(sec)
+                }}
                 className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition sm:px-3 sm:py-1.5 sm:text-xs ${
                   active
                     ? 'bg-[#e23b2e] text-white shadow-sm'
-                    : 'text-gray-300 hover:bg-white/10 hover:text-white'
+                    : 'text-gray-300 [@media(hover:hover)]:hover:bg-white/10 [@media(hover:hover)]:hover:text-white active:bg-[#e23b2e]/80 active:text-white'
                 }`}
               >
                 <Compass size={12} className={active ? 'text-white' : 'text-gray-400'} />
@@ -594,9 +745,14 @@ export default function RoutePlannerPage() {
               sectorKey={sectorKey}
               externalPreset={sectorPreset}
               onRouteChange={handleRouteChange}
+              customStart={customStart}
+              customDest={customDest}
+              onCustomStartChange={setCustomStart}
+              onCustomDestChange={setCustomDest}
+              onEndpointsChange={setPendingEndpoints}
               customWaypoints={customWaypoints}
-              addWaypointMode={addWaypointMode}
-              onToggleAddWaypointMode={() => setAddWaypointMode((m) => !m)}
+              mapPickMode={mapPickMode}
+              onSelectPickMode={handleSelectPickMode}
               onRemoveCustomWaypoint={handleRemoveCustomWaypoint}
               onClearCustomWaypoints={handleClearCustomWaypoints}
             />
@@ -610,11 +766,15 @@ export default function RoutePlannerPage() {
           </div>
 
           <button
+            ref={openDrawerPillRef}
             type="button"
-            onClick={() => setDesktopDrawerOpen(true)}
+            onClick={(e) => {
+              e.currentTarget.blur()
+              setDesktopDrawerOpen(true)
+            }}
             title="Open Route Details sidebar"
             aria-label="Open Route Details sidebar"
-            className={`hidden xl:flex absolute right-0 top-1/2 z-20 -translate-y-1/2 items-center gap-2 rounded-l-2xl border border-r-0 border-white/15 bg-black/75 py-3 pl-3 pr-2.5 text-xs font-semibold text-gray-200 shadow-xl backdrop-blur-xl transition-all duration-300 ease-out hover:border-red-500/40 hover:bg-black/90 hover:pl-4 hover:text-white ${
+            className={`hidden xl:flex absolute right-0 top-1/2 z-20 -translate-y-1/2 items-center gap-2 rounded-l-2xl border border-r-0 border-white/15 bg-black/75 py-3 pl-3 pr-2.5 text-xs font-semibold text-gray-200 shadow-xl backdrop-blur-xl transition-all duration-300 ease-out [@media(hover:hover)]:hover:border-red-500/40 [@media(hover:hover)]:hover:bg-black/90 [@media(hover:hover)]:hover:pl-4 [@media(hover:hover)]:hover:text-white active:bg-[#e23b2e]/80 active:text-white ${
               desktopDrawerOpen || focus
                 ? 'pointer-events-none translate-x-full opacity-0'
                 : 'translate-x-0 opacity-100'
@@ -626,12 +786,41 @@ export default function RoutePlannerPage() {
           </button>
 
           <aside
-            className={`hidden xl:flex xl:flex-col xl:absolute xl:right-4 xl:top-4 xl:bottom-auto xl:z-30 xl:w-[356px] xl:h-auto xl:max-h-[calc(100%-3.75rem)] overflow-hidden rounded-2xl border border-white/10 bg-black/75 p-2.5 shadow-2xl backdrop-blur-xl transition-all duration-300 ease-out ${
+            ref={desktopDrawerRef}
+            className={`hidden xl:flex xl:flex-col xl:absolute xl:right-4 xl:top-4 xl:bottom-auto xl:z-30 xl:w-[368px] xl:h-auto xl:max-h-[calc(100%-3.75rem)] overflow-hidden rounded-2xl border border-white/10 bg-black/75 p-3.5 shadow-2xl backdrop-blur-xl transition-all duration-300 ease-out ${
               desktopDrawerOpen && !focus
                 ? 'xl:translate-x-0 xl:opacity-100'
                 : 'xl:pointer-events-none xl:translate-x-[calc(100%+2rem)] xl:opacity-0'
             }`}
           >
+            {/* Desktop Right Sidebar Title Bar + Explicit Collapse Button (matches ExplorePage & mobile sheet header) */}
+            <div className="mb-2.5 flex shrink-0 items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <h2 className="truncate text-base font-bold text-white">
+                  {activeRoute
+                    ? `${activeRoute.start.name} → ${activeRoute.end.name}`
+                    : 'Route Planner'}
+                </h2>
+                {activeRoute && (
+                  <span className="shrink-0 rounded-full bg-white/10 px-2 py-0.5 font-mono text-[11px] tabular-nums text-gray-300">
+                    {activeRoute.distanceKm} km · {plan ? plan.totalSols : activeRoute.sols} sols
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.currentTarget.blur()
+                  setDesktopDrawerOpen(false)
+                }}
+                title="Collapse sidebar (Esc)"
+                aria-label="Collapse Route Details sidebar"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-gray-300 transition [@media(hover:hover)]:hover:bg-white/10 [@media(hover:hover)]:hover:text-white active:bg-[#e23b2e]/80 active:text-white"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+
             <div className="rm-drawer__bar shrink-0">
               <div className="rm-drawer__tabs">
                 {DRAWER_TABS.map((t) => {
@@ -641,7 +830,8 @@ export default function RoutePlannerPage() {
                       key={t.id}
                       type="button"
                       className={`rm-drawer__tab${drawerTab === t.id ? ' is-active' : ''}`}
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.currentTarget.blur()
                         setDrawerTab(t.id)
                         desktopScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
                       }}
@@ -652,23 +842,14 @@ export default function RoutePlannerPage() {
                   )
                 })}
               </div>
-              <button
-                type="button"
-                onClick={() => setDesktopDrawerOpen(false)}
-                title="Collapse sidebar (Esc)"
-                aria-label="Collapse Route Details sidebar"
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-gray-300 transition hover:bg-white/10 hover:text-white"
-              >
-                <ChevronRight size={16} />
-              </button>
             </div>
 
             <div ref={desktopScrollRef} className="rm-drawer__body min-h-0 flex-1 overflow-y-auto">
               {drawerTab === 'eva' && (
                 <>
-                  <VerdictCard route={route} plan={plan} spaceWeather={spaceWeather} />
+                  <VerdictCard route={activeRoute} plan={plan} spaceWeather={spaceWeather} />
                   <EvaTimeline
-                    route={route}
+                    route={activeRoute}
                     plan={plan}
                     date={evaDate}
                     onDate={setEvaDate}
@@ -680,22 +861,22 @@ export default function RoutePlannerPage() {
 
               {drawerTab === 'hazards' && (
                 <>
-                  <RouteWhy route={route} hazard={hazard} onHazard={setHazard} />
-                  <RouteWarnings route={route} />
+                  <RouteWhy route={activeRoute} hazard={hazard} onHazard={setHazard} />
+                  <RouteWarnings route={activeRoute} />
                 </>
               )}
 
               {drawerTab === 'science' && (
                 <>
                   <AbortProtocolCard
-                    route={route}
+                    route={activeRoute}
                     plan={plan}
                     spaceWeather={spaceWeather}
                     scrubPoint={scrubPoint}
                     onLocateShelter={() => handleMapPointClick('shelter')}
                   />
                   <ScienceStops
-                    route={route}
+                    route={activeRoute}
                     selectedIds={selected}
                     onToggle={toggleStop}
                     onLocateStop={handleLocateStop}
@@ -707,7 +888,7 @@ export default function RoutePlannerPage() {
 
           <div className="rm-bottom hidden xl:block">
             <ElevationProfile
-              route={route}
+              route={activeRoute}
               plan={plan}
               spaceWeather={spaceWeather}
               selectedStopIds={selected}
@@ -727,34 +908,39 @@ export default function RoutePlannerPage() {
         </>
       )}
 
-      {focus && route && (
+      {focus && activeRoute && (
         <div className="rm-focuschip">
           <strong>
-            {route.start.name} → {route.end.name}
+            {activeRoute.start.name} → {activeRoute.end.name}
           </strong>
           <span>
-            {route.distanceKm.toLocaleString()} km · {plan ? plan.totalSols : route.sols} sols ·{' '}
-            {route.riskLabel} risk {route.riskIsMinimum ? '≥ ' : ''}
-            {route.risk}
+            {activeRoute.distanceKm.toLocaleString()} km ·{' '}
+            {plan ? plan.totalSols : activeRoute.sols} sols · {activeRoute.riskLabel} risk{' '}
+            {activeRoute.riskIsMinimum ? '≥ ' : ''}
+            {activeRoute.risk}
           </span>
         </div>
       )}
 
-      {/* ================= MOBILE BOTTOM-LEFT 360° SURFACE VIEW BUTTON & BOTTOM SHEET ================= */}
+      {/* ================= MOBILE BOTTOM-LEFT 360° VIEW BUTTON & BOTTOM SHEET ================= */}
       {!isDesktop && (
         <>
           {reconStops.length > 0 && !focus && (
             <button
               type="button"
-              onClick={() => setPhotoSphereState({ open: true, visor: false })}
-              className="absolute bottom-[74px] left-2.5 z-20 inline-flex items-center gap-2 rounded-xl border border-white/15 bg-black/80 px-3 py-2 text-xs font-bold text-white shadow-xl backdrop-blur-md transition hover:border-red-500/50 hover:bg-black/95 xl:hidden"
+              onClick={(e) => {
+                e.currentTarget.blur()
+                setPhotoSphereState({ open: true, visor: false })
+              }}
+              className="absolute bottom-[74px] left-2.5 z-20 inline-flex items-center gap-2 rounded-xl border border-white/15 bg-black/80 px-3 py-2 text-xs font-bold text-white shadow-xl backdrop-blur-md transition [@media(hover:hover)]:hover:border-red-500/50 [@media(hover:hover)]:hover:bg-black/95 active:scale-95 active:border-[#ff6b57] active:bg-[#e23b2e]/85 xl:hidden"
             >
               <Eye size={14} className="text-red-400" />
-              <span>360° Surface View</span>
+              <span>360° View</span>
             </button>
           )}
 
           <aside
+            ref={mobileSheetRef}
             className={`absolute inset-x-0 bottom-0 z-30 flex flex-col overflow-hidden rounded-t-3xl border-t border-white/15 bg-black/85 shadow-2xl backdrop-blur-xl transition-[height] duration-300 ease-out xl:hidden ${
               SHEET_HEIGHTS[sheetSnap]
             }`}
@@ -772,11 +958,13 @@ export default function RoutePlannerPage() {
               <div className="flex w-full items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="truncate text-sm font-bold text-white">
-                    {route ? `${route.start.name} → ${route.end.name}` : 'Route Planner'}
+                    {activeRoute
+                      ? `${activeRoute.start.name} → ${activeRoute.end.name}`
+                      : 'Route Planner'}
                   </span>
-                  {route && (
+                  {activeRoute && (
                     <span className="shrink-0 rounded-full bg-white/10 px-2 py-0.5 font-mono text-[11px] text-gray-300">
-                      {route.distanceKm} km · {plan ? plan.totalSols : route.sols} sols
+                      {activeRoute.distanceKm} km · {plan ? plan.totalSols : activeRoute.sols} sols
                     </span>
                   )}
                 </div>
@@ -784,10 +972,11 @@ export default function RoutePlannerPage() {
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation()
+                    e.currentTarget.blur()
                     toggleSheetSnap()
                   }}
                   aria-label={sheetSnap === 'peek' ? 'Expand bottom sheet' : 'Collapse bottom sheet'}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-gray-300 transition hover:bg-white/10 hover:text-white"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-gray-300 transition [@media(hover:hover)]:hover:bg-white/10 [@media(hover:hover)]:hover:text-white active:bg-[#e23b2e]/80 active:text-white"
                 >
                   {sheetSnap === 'peek' ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
                 </button>
@@ -803,11 +992,14 @@ export default function RoutePlannerPage() {
                   <button
                     key={t.id}
                     type="button"
-                    onClick={() => handleSelectMobileTab(t.id)}
+                    onClick={(e) => {
+                      e.currentTarget.blur()
+                      handleSelectMobileTab(t.id)
+                    }}
                     className={`-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-xs font-bold transition ${
                       active
                         ? 'border-red-500 text-white'
-                        : 'border-transparent text-gray-400 hover:text-gray-200'
+                        : 'border-transparent text-gray-400 [@media(hover:hover)]:hover:text-gray-200 active:text-red-300'
                     }`}
                   >
                     <Icon size={13} />
@@ -827,9 +1019,14 @@ export default function RoutePlannerPage() {
                   sectorKey={sectorKey}
                   externalPreset={sectorPreset}
                   onRouteChange={handleRouteChange}
+                  customStart={customStart}
+                  customDest={customDest}
+                  onCustomStartChange={setCustomStart}
+                  onCustomDestChange={setCustomDest}
+                  onEndpointsChange={setPendingEndpoints}
                   customWaypoints={customWaypoints}
-                  addWaypointMode={addWaypointMode}
-                  onToggleAddWaypointMode={() => setAddWaypointMode((m) => !m)}
+                  mapPickMode={mapPickMode}
+                  onSelectPickMode={handleSelectPickMode}
                   onRemoveCustomWaypoint={handleRemoveCustomWaypoint}
                   onClearCustomWaypoints={handleClearCustomWaypoints}
                   onPlanSuccess={() => {
@@ -841,7 +1038,7 @@ export default function RoutePlannerPage() {
 
               {mobileTab === 'profile' && (
                 <ElevationProfile
-                  route={route}
+                  route={activeRoute}
                   plan={plan}
                   spaceWeather={spaceWeather}
                   selectedStopIds={selected}
@@ -861,9 +1058,9 @@ export default function RoutePlannerPage() {
 
               {mobileTab === 'eva' && (
                 <div className="space-y-3">
-                  <VerdictCard route={route} plan={plan} spaceWeather={spaceWeather} />
+                  <VerdictCard route={activeRoute} plan={plan} spaceWeather={spaceWeather} />
                   <EvaTimeline
-                    route={route}
+                    route={activeRoute}
                     plan={plan}
                     date={evaDate}
                     onDate={setEvaDate}
@@ -875,22 +1072,22 @@ export default function RoutePlannerPage() {
 
               {mobileTab === 'hazards' && (
                 <div className="space-y-3">
-                  <RouteWhy route={route} hazard={hazard} onHazard={setHazard} />
-                  <RouteWarnings route={route} />
+                  <RouteWhy route={activeRoute} hazard={hazard} onHazard={setHazard} />
+                  <RouteWarnings route={activeRoute} />
                 </div>
               )}
 
               {mobileTab === 'science' && (
                 <div className="space-y-3">
                   <AbortProtocolCard
-                    route={route}
+                    route={activeRoute}
                     plan={plan}
                     spaceWeather={spaceWeather}
                     scrubPoint={scrubPoint}
                     onLocateShelter={() => handleMapPointClick('shelter')}
                   />
                   <ScienceStops
-                    route={route}
+                    route={activeRoute}
                     selectedIds={selected}
                     onToggle={toggleStop}
                     onLocateStop={handleLocateStop}
@@ -910,7 +1107,7 @@ export default function RoutePlannerPage() {
           setPhotoSphereState((s) => ({ ...s, visor: !s.visor }))
         }
         onClose={() => setPhotoSphereState({ open: false, visor: false })}
-        route={route}
+        route={activeRoute}
         plan={plan}
         spaceWeather={spaceWeather}
         reconStops={reconStops}

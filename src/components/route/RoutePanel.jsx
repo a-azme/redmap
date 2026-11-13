@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import { CircleDot, MapPin, ArrowUpDown, ChevronDown, Plus, X } from 'lucide-react';
+import { CircleDot, MapPin, MapPinPlus, ArrowUpDown, ChevronDown, Plus, X } from 'lucide-react';
 import './route.css';
 import RouteSettings from './RouteSettings';
 import {
@@ -39,21 +39,67 @@ function resolveRouteEndpoints(targetLocation, fallbackStartId, fallbackDestId) 
   };
 }
 
-function LocationRow({ label, icon, loc, id, setId, options }) {
+function LocationRow({
+  label,
+  icon,
+  isPicking,
+  onPickClick,
+  loc,
+  id,
+  setId,
+  customLoc,
+  onClearCustom,
+  options,
+}) {
+  const selectValue = customLoc ? '__custom__' : id;
+
+  const handleSelectChange = (e) => {
+    const val = e.target.value;
+    if (val === '__custom__') return;
+    onClearCustom?.(null);
+    setId(val);
+  };
+
   return (
     <div className="rm-loc">
       <span className="rm-loc__icon">{icon}</span>
       <div className="rm-loc__body">
-        <small>{label}</small>
-        <div className="rm-select-wrap">
-          <select value={id} onChange={(e) => setId(e.target.value)}>
-            {options.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </select>
-          <ChevronDown size={15} className="rm-select-chevron" />
+        <small>
+          {label}
+          {isPicking ? ' · Tap map…' : ''}
+        </small>
+        <div className="rm-loc__row">
+          <div className="rm-select-wrap">
+            <select value={selectValue} onChange={handleSelectChange}>
+              {customLoc && (
+                <option value="__custom__">
+                  {customLoc.name}
+                </option>
+              )}
+              {options.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={15} className="rm-select-chevron" />
+          </div>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.currentTarget.blur();
+              onPickClick?.();
+            }}
+            className={`rm-loc__picker${isPicking ? ' is-picking' : ''}${customLoc ? ' has-custom' : ''}`}
+            title={
+              isPicking
+                ? `Cancel picking ${label.toLowerCase()} on map`
+                : `Pick custom ${label.toLowerCase()} on map`
+            }
+            aria-label={`Pick custom ${label.toLowerCase()} on map`}
+          >
+            <MapPinPlus size={15} />
+          </button>
         </div>
         <span className="rm-coord">{fmtCoord(loc.lat, loc.lon)}</span>
       </div>
@@ -69,9 +115,14 @@ export default function RoutePanel({
   initialDestId = 'boxwork',
   skipInitialPlan = false,
   onPlanSuccess,
+  customStart = null,
+  customDest = null,
+  onCustomStartChange,
+  onCustomDestChange,
+  onEndpointsChange,
   customWaypoints = [],
-  addWaypointMode = false,
-  onToggleAddWaypointMode,
+  mapPickMode = null,
+  onSelectPickMode,
   onRemoveCustomWaypoint,
   onClearCustomWaypoints,
 }) {
@@ -91,20 +142,29 @@ export default function RoutePanel({
   const first = useRef(0);
   const mountedRef = useRef(false);
 
-  const activeSectorKey =
-    sectorKey === 'jezero' || detectSectorForLocationId(startId) === 'jezero'
-      ? 'jezero'
-      : 'gale';
+  const activeSectorKey = sectorKey === 'jezero' ? 'jezero' : 'gale';
   const sectorLocations = getLocationsForSector(activeSectorKey);
-  const start =
+  const defaultStartId = activeSectorKey === 'jezero' ? 'butler' : 'gediz';
+  const defaultDestId = activeSectorKey === 'jezero' ? 'neretva' : 'boxwork';
+
+  const presetStart =
     sectorLocations.find((l) => l.id === startId) ||
-    LOCATIONS.find((l) => l.id === startId) ||
+    sectorLocations.find((l) => l.id === defaultStartId) ||
     sectorLocations[0];
-  const dest =
-    sectorLocations.find((l) => l.id === destId) ||
-    LOCATIONS.find((l) => l.id === destId) ||
+  const presetDest =
+    sectorLocations.find((l) => l.id === destId && l.id !== presetStart.id) ||
+    sectorLocations.find((l) => l.id === defaultDestId && l.id !== presetStart.id) ||
+    sectorLocations.find((l) => l.id !== presetStart.id) ||
     sectorLocations[1] ||
     sectorLocations[0];
+
+  const start = customStart || presetStart;
+  const dest = customDest || presetDest;
+
+  // Keep map preview endpoints in sync immediately when user picks custom Start/Destination or changes dropdowns
+  useEffect(() => {
+    onEndpointsChange?.({ start, end: dest });
+  }, [start, dest, onEndpointsChange]);
 
   const runPlan = async (
     sLoc = start,
@@ -153,7 +213,7 @@ export default function RoutePanel({
                     settings: {
                       ...primary.settings,
                       payloadKg: cfg.payloadKg,
-                      crewSize: cfg.crewSize,
+                      crewSize: cfg.payloadKg ? cfg.crewSize : primary.settings?.crewSize,
                       customWaypoints: cWaypoints,
                     },
                   }
@@ -182,11 +242,23 @@ export default function RoutePanel({
     }
   };
 
-  const handlePlan = () => runPlan(start, dest, settings, true, customWaypoints);
+  const handlePlan = (e) => {
+    e?.currentTarget?.blur();
+    onSelectPickMode?.(null);
+    runPlan(start, dest, settings, true, customWaypoints);
+  };
 
   const handleSettingsChange = (nextSettings) => {
     const prev = settings;
     setSettings(nextSettings);
+    if (
+      nextSettings.mode !== prev.mode ||
+      nextSettings.maxSlopeDeg !== prev.maxSlopeDeg ||
+      nextSettings.showScience !== prev.showScience
+    ) {
+      runPlan(start, dest, nextSettings, false, customWaypoints);
+      return;
+    }
     if (
       nextSettings.payloadKg !== prev.payloadKg ||
       nextSettings.evaHoursPerSol !== prev.evaHoursPerSol ||
@@ -220,13 +292,15 @@ export default function RoutePanel({
   useEffect(() => {
     if (!externalPreset?.startId || !externalPreset?.destId) return undefined;
     const timer = setTimeout(() => {
-      const sLoc = LOCATIONS.find((l) => l.id === externalPreset.startId) || start;
-      const dLoc = LOCATIONS.find((l) => l.id === externalPreset.destId) || dest;
+      const sLoc = LOCATIONS.find((l) => l.id === externalPreset.startId) || presetStart;
+      const dLoc = LOCATIONS.find((l) => l.id === externalPreset.destId) || presetDest;
       const nextSettings = {
         ...settings,
         mode: externalPreset.mode || settings.mode,
         payloadKg: externalPreset.payloadKg ?? settings.payloadKg,
       };
+      onCustomStartChange?.(null);
+      onCustomDestChange?.(null);
       setStartId(sLoc.id);
       setDestId(dLoc.id);
       setSettings(nextSettings);
@@ -238,10 +312,37 @@ export default function RoutePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalPreset?.seq]);
 
-  const swap = () => {
-    setStartId(destId);
-    setDestId(startId);
+  const swap = (e) => {
+    e?.currentTarget?.blur();
+    const prevCustomStart = customStart;
+    const prevCustomDest = customDest;
+    onCustomStartChange?.(
+      prevCustomDest
+        ? {
+            ...prevCustomDest,
+            id: `custom-start-${activeSectorKey}-${prevCustomDest.lat.toFixed(4)}-${prevCustomDest.lon.toFixed(4)}`,
+            name: 'Start',
+            sector: activeSectorKey,
+          }
+        : null
+    );
+    onCustomDestChange?.(
+      prevCustomStart
+        ? {
+            ...prevCustomStart,
+            id: `custom-dest-${activeSectorKey}-${prevCustomStart.lat.toFixed(4)}-${prevCustomStart.lon.toFixed(4)}`,
+            name: 'Destination',
+            sector: activeSectorKey,
+          }
+        : null
+    );
+    setStartId(presetDest.id);
+    setDestId(presetStart.id);
   };
+
+  const isPickingStart = mapPickMode === 'start';
+  const isPickingDest = mapPickMode === 'dest';
+  const isPickingDetour = mapPickMode === 'detour';
 
   return (
     <aside className="rm-panel">
@@ -252,9 +353,13 @@ export default function RoutePanel({
       <LocationRow
         label="Start Location"
         icon={<CircleDot size={15} className="text-emerald-400" />}
+        isPicking={isPickingStart}
+        onPickClick={() => onSelectPickMode?.('start')}
         loc={start}
-        id={start.id}
+        id={presetStart.id}
         setId={setStartId}
+        customLoc={customStart}
+        onClearCustom={onCustomStartChange}
         options={sectorLocations}
       />
       <button type="button" className="rm-swap" onClick={swap} title="Swap start and destination">
@@ -263,9 +368,13 @@ export default function RoutePanel({
       <LocationRow
         label="Destination"
         icon={<MapPin size={15} className="text-red-400" />}
+        isPicking={isPickingDest}
+        onPickClick={() => onSelectPickMode?.('dest')}
         loc={dest}
-        id={dest.id}
+        id={presetDest.id}
         setId={setDestId}
+        customLoc={customDest}
+        onClearCustom={onCustomDestChange}
         options={sectorLocations}
       />
 
@@ -274,17 +383,27 @@ export default function RoutePanel({
         <div className="rm-custom-wps__bar">
           <button
             type="button"
-            onClick={onToggleAddWaypointMode}
-            className={`rm-custom-wps__btn ${addWaypointMode ? 'is-active' : ''}`}
-            title="Click anywhere on the crater map to insert an intermediate detour waypoint"
+            onClick={(e) => {
+              e.currentTarget.blur();
+              onSelectPickMode?.('detour');
+            }}
+            className={`rm-custom-wps__btn ${isPickingDetour ? 'is-active' : ''}`}
+            title="Tap to extend path or add multiple intermediate detour stops on the crater map"
           >
             <Plus size={13} />
-            <span>{addWaypointMode ? 'Click Map to Place Detour…' : 'Add Map Detour Waypoint'}</span>
+            <span>
+              {isPickingDetour
+                ? `Tap Map to Add Stops (${customWaypoints.length}/4)`
+                : 'Add Map Detour Stops'}
+            </span>
           </button>
           {customWaypoints.length > 0 && (
             <button
               type="button"
-              onClick={onClearCustomWaypoints}
+              onClick={(e) => {
+                e.currentTarget.blur();
+                onClearCustomWaypoints?.();
+              }}
               className="rm-custom-wps__clear"
               title="Clear all custom detour waypoints"
             >
@@ -301,7 +420,10 @@ export default function RoutePanel({
                 <span className="rm-custom-wps__coord">{fmtCoord(w.lat, w.lon)}</span>
                 <button
                   type="button"
-                  onClick={() => onRemoveCustomWaypoint?.(w.id)}
+                  onClick={(e) => {
+                    e.currentTarget.blur();
+                    onRemoveCustomWaypoint?.(w.id);
+                  }}
                   aria-label={`Remove ${w.name}`}
                   className="rm-custom-wps__del"
                 >

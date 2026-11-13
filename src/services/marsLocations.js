@@ -249,15 +249,15 @@ function slugify(name, index) {
 function buildDescription(item, meta) {
   const spanText =
     item.diameter && item.diameter > 0
-      ? `spanning approximately ${item.diameter.toLocaleString()} km in diameter`
-      : 'pinpointing a key surface landing and exploration zone'
+      ? `spanning ~${item.diameter.toLocaleString()} km`
+      : 'marking a surface landing and exploration zone'
   const regionNote = meta.isRegion
-    ? 'broad planetary region'
-    : `Level ${item.level} ${meta.type.toLowerCase()}`
+    ? 'planetary region'
+    : meta.type.toLowerCase()
   const nasaNote = item.is_nasa
-    ? ' Designated as a high-priority NASA scientific and mission landmark.'
+    ? ' Priority NASA science and exploration landmark.'
     : ''
-  return `${item.name} is a ${regionNote} on Mars (${Math.abs(item.lat).toFixed(2)}°${item.lat >= 0 ? 'N' : 'S'}, ${Math.abs(item.lon).toFixed(2)}°${item.lon >= 0 ? 'E' : 'W'}), ${spanText}. Visible on the globe between ${item.min_alt_km.toLocaleString()} km and ${item.max_alt_km.toLocaleString()} km altitude.${nasaNote}`
+  return `${item.name} is a Martian ${regionNote} ${spanText}.${nasaNote}`
 }
 
 export function normalizeMarsLocations(list) {
@@ -336,7 +336,7 @@ export function normalizeMarsLocations(list) {
       mission: curated?.mission || {
         name: is_nasa ? 'NASA Mars Reconnaissance & Odyssey Orbiters' : 'MGS MOLA & MRO Global Survey',
         years: '1997 – Present',
-        note: `Mapped across ${min_alt_km.toLocaleString()}–${max_alt_km.toLocaleString()} km orbital altitude band.`,
+        note: 'Global laser altimetry, thermal inertia, and context imaging.',
       },
       tags,
     }

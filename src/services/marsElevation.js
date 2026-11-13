@@ -74,7 +74,7 @@ export function browserTileLoader(template) {
       img.src = url
     })
   return async (z, x, y) => {
-    for (const ext of ['png', 'jpg']) {
+    for (const ext of ['jpg', 'png']) {
       const img = await loadImg(fill(template, ext, z, x, y))
       if (!img) continue
       const ctx = getCtx()

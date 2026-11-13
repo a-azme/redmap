@@ -18,10 +18,10 @@ export default function RouteWaypoints({ route, embedded = false }) {
         <li><span className="rm-wp__n rm-wp__n--start">S</span><div><strong>{dot(0)}{route.start.name}</strong><small>Start · {ns(route.start.lat)}, {route.start.lon.toFixed(2)}°E{legInfo(0)}</small></div></li>
         {route.waypoints.map((w, i) => (
           <li key={w.n}>
-            <span className={`rm-wp__n`}>{w.n}</span>
+            <span className="rm-wp__n">{w.n}</span>
             <div>
-              <strong>{dot(i + 1)}{w.kind === 'stop' ? w.name : `Waypoint ${w.n}`}</strong>
-              <small>km {w.km} · {ns(w.lat)}, {w.lon.toFixed(2)}°E{w.elevKm != null && ` · ${w.elevKm} km elev`}{w.kind === 'stop' ? ' · science stop' : ' · change of direction'}{legInfo(i + 1)}</small>
+              <strong>{dot(i + 1)}{w.kind === 'stop' || w.kind === 'custom' ? w.name : `Waypoint ${w.n}`}</strong>
+              <small>km {w.km} · {ns(w.lat)}, {w.lon.toFixed(2)}°E{w.elevKm != null && ` · ${w.elevKm} km elev`}{w.kind === 'stop' ? ' · science stop' : w.kind === 'custom' ? ' · detour stop' : ' · change of direction'}{legInfo(i + 1)}</small>
             </div>
           </li>
         ))}
