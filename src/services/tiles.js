@@ -186,8 +186,58 @@ export function guardCesiumViewer(viewer) {
   }
 }
 
+let fallbackProviderPromise = null
+
+export function preloadFallbackTexture() {
+  if (!fallbackProviderPromise) {
+    fallbackProviderPromise = Cesium.SingleTileImageryProvider.fromUrl('/assets/mars_texture.jpg', {
+      rectangle: Cesium.Rectangle.MAX_VALUE,
+      ellipsoid: MARS,
+    }).catch(() => null)
+  }
+  return fallbackProviderPromise
+}
+
+// Kick off decoding /assets/mars_texture.jpg immediately when the module is evaluated
+preloadFallbackTexture()
+
 /**
- * Finds a working NASA tile source for a layer config and puts it on the viewer.
+ * Ensures the lightweight local Mars texture stays permanently at index 0 of imageryLayers
+ * as a zero-overhead underlayer so the globe never flashes blank while NASA tiles stream in.
+ */
+export async function ensureFallbackLayer(viewer) {
+  if (!viewer || viewer.isDestroyed()) return null
+  const layers = viewer.imageryLayers
+  for (let i = 0; i < layers.length; i++) {
+    const existing = layers.get(i)
+    if (existing && existing._isFallback) return existing
+  }
+  const provider = await preloadFallbackTexture()
+  if (!provider || viewer.isDestroyed()) return null
+  for (let i = 0; i < layers.length; i++) {
+    const existing = layers.get(i)
+    if (existing && existing._isFallback) return existing
+  }
+  const fallbackLayer = layers.addImageryProvider(provider, 0)
+  fallbackLayer._isFallback = true
+  viewer.scene.requestRender()
+  return fallbackLayer
+}
+
+function removeNonFallbackLayers(viewer) {
+  if (!viewer || viewer.isDestroyed()) return
+  const layers = viewer.imageryLayers
+  for (let i = layers.length - 1; i >= 0; i--) {
+    const layer = layers.get(i)
+    if (!layer._isFallback) {
+      layers.remove(layer, true)
+    }
+  }
+}
+
+/**
+ * Finds a working NASA tile source for a layer config and puts it on the viewer
+ * while preserving the permanent local Mars underlayer at index 0.
  * cb = { cancelled: () => bool, onStatus: (s) => void, onSource: (name) => void }
  */
 export function applyLayer(viewer, cfg, key, cb) {
@@ -216,20 +266,8 @@ export function applyLayer(viewer, cfg, key, cb) {
   viewer.scene.preRender.addEventListener(fadeOverlays)
 
   ;(async () => {
-    let mainReady = false
-    if (viewer.imageryLayers.length === 0) {
-      Cesium.SingleTileImageryProvider.fromUrl('/assets/mars_texture.jpg', {
-        rectangle: Cesium.Rectangle.MAX_VALUE,
-        ellipsoid: MARS,
-      })
-        .then((lowRes) => {
-          if (!isCancelled() && !mainReady && viewer.imageryLayers.length === 0) {
-            viewer.imageryLayers.addImageryProvider(lowRes)
-            viewer.scene.requestRender()
-          }
-        })
-        .catch(() => {})
-    }
+    await ensureFallbackLayer(viewer)
+    if (isCancelled()) return
 
     let chosen = null
     let ext = null
@@ -238,29 +276,17 @@ export function applyLayer(viewer, cfg, key, cb) {
       if (isCancelled()) return
       if (ext) { chosen = s; break }
     }
-    mainReady = true
 
     if (!chosen) {
       console.warn('[RedMap] No working tile source for layer:', key, '– using local texture fallback')
-      try {
-        const fallback = await Cesium.SingleTileImageryProvider.fromUrl('/assets/mars_texture.jpg', {
-          rectangle: Cesium.Rectangle.MAX_VALUE,
-          ellipsoid: MARS,
-        })
-        if (!isCancelled() && fallback) {
-          viewer.imageryLayers.removeAll()
-          viewer.imageryLayers.addImageryProvider(fallback)
-          viewer.scene.requestRender()
-          cb.onSource('Local Mars Texture')
-          cb.onStatus('ok')
-          return
-        }
-      } catch {
-        // ignore
-      }
-      if (!isCancelled()) {
-        viewer.imageryLayers.removeAll()
-        viewer.scene.requestRender()
+      const fallback = await ensureFallbackLayer(viewer)
+      if (isCancelled()) return
+      removeNonFallbackLayers(viewer)
+      viewer.scene.requestRender()
+      if (fallback) {
+        cb.onSource('Local Mars Texture')
+        cb.onStatus('ok')
+      } else {
         cb.onStatus('error')
       }
       return
@@ -282,7 +308,7 @@ export function applyLayer(viewer, cfg, key, cb) {
       }
       return p
     }
-    viewer.imageryLayers.removeAll()
+    removeNonFallbackLayers(viewer)
     viewer.imageryLayers.addImageryProvider(base)
     viewer.scene.requestRender()
 

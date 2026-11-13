@@ -3,7 +3,7 @@ import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { Plus, Minus, Crosshair, RotateCcw, X } from 'lucide-react'
 import { TILE_LAYERS, ROVERS } from '../../services/layerService'
-import { MARS, at, applyLayer, guardCesiumViewer } from '../../services/tiles'
+import { MARS, at, applyLayer, ensureFallbackLayer, guardCesiumViewer } from '../../services/tiles'
 import {
   MARS_LOCATIONS,
   getIdealFlyHeightMeters,
@@ -48,6 +48,13 @@ function get2DFillRect(viewer, centerLon = 77) {
   )
 }
 
+// Realistic look on/off (3D e on, 2D e off)
+function setRealisticLook(scene, on) {
+  scene.globe.enableLighting = on
+  scene.globe.showGroundAtmosphere = on
+  if (scene.skyAtmosphere) scene.skyAtmosphere.show = on
+}
+
 // Persistent singleton Cesium.Viewer so switching between Explore, Layers, and Missions
 // re-parents the existing WebGL canvas instead of destroying and recreating the context.
 let sharedGlobe = null
@@ -71,7 +78,8 @@ function getSharedGlobe() {
     infoBox: false,
     selectionIndicator: false,
     skyBox: false,
-    skyAtmosphere: false,
+    // Mars er radius onujayi atmosphere halo
+    skyAtmosphere: new Cesium.SkyAtmosphere(MARS),
     orderIndependentTranslucency: false,
     mapProjection: new Cesium.GeographicProjection(MARS),
     mapMode2D: Cesium.MapMode2D.INFINITE_SCROLL,
@@ -89,10 +97,46 @@ function getSharedGlobe() {
   const scene = viewer.scene
   scene.backgroundColor = Cesium.Color.TRANSPARENT
   scene.globe.baseColor = Cesium.Color.fromCssColorString('#2a1208')
-  scene.globe.showGroundAtmosphere = false
-  scene.globe.enableLighting = false
   if (scene.sun) scene.sun.show = false
   if (scene.moon) scene.moon.show = false
+
+  // ---- Mars-style atmosphere (edge e lal-komla halo) ----
+  const sky = scene.skyAtmosphere
+  if (sky) {
+    sky.hueShift = -0.45 // nil theke komla/lal
+    sky.saturationShift = -0.25
+    sky.brightnessShift = -0.15
+    sky.atmosphereLightIntensity = 30.0
+  }
+  scene.globe.atmosphereHueShift = -0.45
+  scene.globe.atmosphereSaturationShift = -0.3
+  scene.globe.atmosphereBrightnessShift = -0.25
+
+  // ---- Day/night shading (terminator) ----
+  scene.globe.dynamicAtmosphereLighting = true
+  scene.globe.dynamicAtmosphereLightingFromSun = false
+  scene.globe.nightFadeOutDistance = 20_000_000
+  scene.globe.nightFadeInDistance = 5_000_000
+  scene.light = new Cesium.DirectionalLight({
+    direction: new Cesium.Cartesian3(1.0, 0.0, -0.3),
+    intensity: 2.2,
+  })
+  setRealisticLook(scene, true)
+
+  // Light camera er sathe sathe thake (upor-bam theke ashche), tai globe ghurleo
+  // terminator (alo-chhaya shimana) shobshomoy dekha jay.
+  const lightDir = new Cesium.Cartesian3()
+  const lightTmp = new Cesium.Cartesian3()
+  scene.preRender.addEventListener(() => {
+    if (viewer.isDestroyed() || scene.mode !== Cesium.SceneMode.SCENE3D) return
+    const cam = viewer.camera
+    Cesium.Cartesian3.multiplyByScalar(cam.rightWC, 0.8, lightTmp)
+    Cesium.Cartesian3.add(cam.directionWC, lightTmp, lightDir)
+    Cesium.Cartesian3.multiplyByScalar(cam.upWC, -0.35, lightTmp)
+    Cesium.Cartesian3.add(lightDir, lightTmp, lightDir)
+    Cesium.Cartesian3.normalize(lightDir, lightDir)
+    Cesium.Cartesian3.clone(lightDir, scene.light.direction)
+  })
 
   // Render on demand instead of continuous 60 FPS loop when idle
   scene.requestRenderMode = true
@@ -100,6 +144,7 @@ function getSharedGlobe() {
   if ('msaaSamples' in scene) scene.msaaSamples = 1
 
   guardCesiumViewer(viewer)
+  ensureFallbackLayer(viewer)
 
   const ctrl = scene.screenSpaceCameraController
   ctrl.minimumZoomDistance = MIN_ZOOM_METERS
@@ -113,6 +158,7 @@ function getSharedGlobe() {
   const state = {
     container,
     viewer,
+    globeDrawn: false,
     appliedKey: null,
     disposeLayer: null,
     status: 'loading',
@@ -126,6 +172,24 @@ function getSharedGlobe() {
     startSpin: null,
     stopSpin: null,
   }
+
+  scene.globe.tileLoadProgressEvent.addEventListener(() => {
+    if (!viewer.isDestroyed()) {
+      scene.requestRender()
+    }
+  })
+
+  const checkGlobeDrawn = () => {
+    if (state.globeDrawn || viewer.isDestroyed()) return
+    const renderedTiles = scene.globe?._surface?._tilesToRender?.length || 0
+    if (renderedTiles > 0 && viewer.imageryLayers.length > 0) {
+      state.globeDrawn = true
+      scene.postRender.removeEventListener(checkGlobeDrawn)
+      scene.requestRender()
+      window.dispatchEvent(new Event('rm:ready'))
+    }
+  }
+  scene.postRender.addEventListener(checkGlobeDrawn)
 
   const spinStep = (now) => {
     if (!state.spinning || viewer.isDestroyed()) {
@@ -409,6 +473,8 @@ export default function MarsGlobe({
 
     if (mode === '2D') {
       scene.backgroundColor = Cesium.Color.fromCssColorString('#2a1208')
+      // 2D map e lighting/atmosphere off (dark half dekhte kharap lagbe)
+      setRealisticLook(scene, false)
       scene.morphTo2D(1.0)
       scene.completeMorph()
       ctrl.minimumZoomDistance = MIN_ZOOM_METERS
@@ -423,6 +489,7 @@ export default function MarsGlobe({
       })
     } else {
       scene.backgroundColor = Cesium.Color.TRANSPARENT
+      setRealisticLook(scene, true)
       scene.morphTo3D(1.0)
       scene.completeMorph()
       ctrl.minimumZoomDistance = MIN_ZOOM_METERS
@@ -489,7 +556,7 @@ export default function MarsGlobe({
         if (!cancelled) {
           shared.status = s
           shared.onLayerState?.(s, undefined)
-          if (s === 'ok' || s === 'error') {
+          if (s === 'error' || (s === 'ok' && shared.globeDrawn)) {
             window.dispatchEvent(new Event('rm:ready'))
           }
         }
@@ -661,8 +728,19 @@ export default function MarsGlobe({
 
       let dirty = false
 
-      // >= 24,000 km: hide all points and location names
-      if (altKm >= HIDE_ALL_ALT_KM) {
+      const renderedTiles = viewer.scene.globe?._surface?._tilesToRender?.length || 0
+      const isGlobeSurfaceReady =
+        Boolean(sharedGlobe?.globeDrawn) ||
+        (renderedTiles > 0 && viewer.imageryLayers.length > 0)
+
+      if (isGlobeSurfaceReady && sharedGlobe && !sharedGlobe.globeDrawn) {
+        sharedGlobe.globeDrawn = true
+        window.dispatchEvent(new Event('rm:ready'))
+      }
+
+      // Wait until the globe quadtree has rendered its surface before showing location markers,
+      // and hide all points/labels when altitude >= 24,000 km
+      if (!isGlobeSurfaceReady || altKm >= HIDE_ALL_ALT_KM) {
         for (let i = 0; i < tracked.length; i++) {
           if (tracked[i].ent.show) {
             tracked[i].ent.show = false
@@ -922,7 +1000,11 @@ export default function MarsGlobe({
         backgroundImage: mode === '2D' ? 'none' : "url('/assets/deep_space.png')",
       }}
     >
-      <div ref={elRef} className="h-full w-full" />
+      <div
+        ref={elRef}
+        className="h-full w-full"
+        style={{ filter: 'contrast(1.06) saturate(1.1)' }}
+      />
 
       {/* Zoom in, Zoom out, Center on location, Reset buttons on the right top side */}
       <div className={`absolute z-20 flex flex-col gap-2 ${controlsClassName || 'right-3 top-3 sm:right-4 sm:top-4'}`}>
