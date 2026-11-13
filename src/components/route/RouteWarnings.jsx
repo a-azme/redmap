@@ -1,35 +1,29 @@
-import { ShieldAlert } from 'lucide-react'
-import { ROUGH_SLOPE } from '../../constants/config'
+const ICON = { critical: '⛔', caution: '⚠️', info: 'ℹ️' };
 
-export default function RouteWarnings({ analysis }) {
-  const warnings = []
-  if (analysis.roughSpot && analysis.maxSlope > ROUGH_SLOPE) {
-    warnings.push(
-      `Steep section at ${analysis.roughSpot.km.toFixed(0)} km (slope ${analysis.maxSlope.toFixed(1)}°)`
-    )
-  }
-  if (analysis.roughCount > 0) {
-    warnings.push(`${analysis.roughCount} rough segment(s) on this route`)
-  }
-  if (analysis.sols > 8) {
-    warnings.push('Long route: plan extra supplies and power')
-  }
+export default function RouteWarnings({ route }) {
+  if (!route) return null;
+  const { warnings } = route;
 
   return (
-    <div>
-      <div className="font-semibold mb-3">Safety Alerts</div>
-      {warnings.length === 0 ? (
-        <div className="text-sm text-green-400">No major hazards detected.</div>
-      ) : (
-        <div className="space-y-2">
-          {warnings.map((w) => (
-            <div key={w} className="flex gap-2 text-sm text-amber-400">
-              <ShieldAlert size={16} className="shrink-0 mt-0.5" />
-              <span>{w}</span>
+    <section className="rm-card rm-warnings">
+      <h3>Hazards &amp; Conditions <span className="rm-count">{warnings.length}</span></h3>
+      {warnings.length === 0 && <p className="rm-muted">No hazards detected with current limits.</p>}
+      <ul>
+        {warnings.map((w) => (
+          <li key={w.id} className={`rm-warn rm-warn--${w.severity}`}>
+            <span>{ICON[w.severity]}</span>
+            <div>
+              <strong>{w.title}</strong>
+              <small>
+                {w.toKm - w.fromKm >= route.distanceKm - 1
+                  ? 'Entire route'
+                  : `km ${Math.round(w.fromKm)}–${Math.round(w.toKm)}`}
+              </small>
+              <p>{w.detail}</p>
             </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
