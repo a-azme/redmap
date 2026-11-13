@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Red Map</title>
+<meta name="theme-color" content="#050304">
+<noscript><meta http-equiv="refresh" content="3;url=/"></noscript>
+<link rel="preload" as="image" href="../assets/mars.jpg" media="(min-width: 701px)">
+<link rel="preload" as="image" href="../assets/mars-mobile.jpg" media="(max-width: 700px)">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&display=swap">
+<style>
+:root{--bg:#050304;--text:#f4efec;--mars:#ff5a2b;
+  --font:"Google Sans","Product Sans","Outfit",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font)}
+body{overflow:hidden}
+
+.sky{position:fixed;inset:0;overflow:hidden;
+  background:
+    radial-gradient(120% 60% at 85% 105%,#c2491f 0%,#5a1d0d 35%,transparent 60%),
+    radial-gradient(60% 40% at 20% 20%,#2a1612 0%,transparent 70%),
+    var(--bg)}
+.sky img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:60% 50%;
+  opacity:0;transition:opacity 1s ease;transform:scale(1.04);animation:drift 40s ease-in-out infinite alternate}
+.sky img.ready{opacity:1}
+.sky::after{content:"";position:absolute;inset:0;
+  background:radial-gradient(90% 70% at 50% 40%,transparent 40%,rgba(0,0,0,.45) 100%)}
+@keyframes drift{from{transform:scale(1.04)}to{transform:scale(1.12) translate3d(-1.5%,1%,0)}}
+
+main{position:relative;z-index:2;height:100%;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;text-align:center;padding:24px;margin-top:-4vh;
+  padding-top:calc(24px + env(safe-area-inset-top,0px));padding-bottom:calc(24px + env(safe-area-inset-bottom,0px))}
+h1{font-weight:400;font-size:clamp(1.9rem,2.9vw,2.9rem);letter-spacing:-.01em;line-height:1;
+  text-shadow:0 2px 30px rgba(0,0,0,.6)}
+.arc{width:20px;height:20px;margin-top:22px}
+.arc circle{fill:none;stroke:var(--mars);stroke-width:3.5;stroke-linecap:round;stroke-dasharray:22 70;
+  transform-origin:center;animation:spin 1.1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Main site hidden-e load hoy, tai ready hole shathe shathe khule jay */
+#preload{position:fixed;top:0;left:0;width:100vw;height:100vh;border:0;opacity:0;pointer-events:none;visibility:hidden}
+
+@media (max-width:700px){.sky img{object-position:55% 50%}main{margin-top:-8vh}}
+@media (prefers-reduced-motion:reduce){.sky img{animation:none;transform:none}}
+</style>
+</head>
+<body>
+<div class="sky" aria-hidden="true">
+  <picture>
+    <source media="(max-width:700px)" srcset="../assets/mars-mobile.jpg">
+    <img id="bg" src="../assets/mars.jpg" alt="" decoding="async" fetchpriority="high">
+  </picture>
+</div>
+
+<main>
+  <h1>Red Map</h1>
+  <svg class="arc" viewBox="0 0 30 30" role="img" aria-label="Loading"><circle cx="15" cy="15" r="11"/></svg>
+</main>
+
+<iframe id="preload" title="" tabindex="-1" aria-hidden="true"></iframe>
+
+<script>
+(function(){
+  var TARGET='/';     
+  var MIN=1200;         
+  var MAX=3000;        
+  var start=Date.now(), gone=false;
+
+  var bg=document.getElementById('bg');
+  function showImage(){ bg.classList.add('ready'); }
+  if(bg.complete && bg.naturalWidth){ showImage(); }
+  else { bg.addEventListener('load',showImage); bg.addEventListener('error',showImage); }
+
+  function go(){
+    if(gone) return; gone=true;
+    try{ sessionStorage.setItem('rm_enter','1'); }catch(e){}   // main site ke bole: ekbar dhukte dao
+    location.replace(TARGET);
+  }
+
+  // Ashol site background e load shuru, load hole auto open
+  var f=document.getElementById('preload');
+  f.addEventListener('load',function(){
+    setTimeout(go,Math.max(0,MIN-(Date.now()-start)));
+  });
+  f.src=TARGET;
+
+  // Site load na hole-o 3s por open hobe
+  setTimeout(go,MAX);
+})();
+</script>
+</body>
+</html>

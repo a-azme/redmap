@@ -2,6 +2,18 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      (function () {
+        try {
+          if (window.top !== window.self) return;
+          if (sessionStorage.getItem('rm_enter')) {
+            sessionStorage.removeItem('rm_enter');
+            return;
+          }
+        } catch (e) { return; }
+        location.replace('/landing/index.html');
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>redmap</title>

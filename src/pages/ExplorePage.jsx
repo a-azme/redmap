@@ -21,8 +21,15 @@ export default function ExplorePage() {
   const selected = useMapStore((s) => s.selected)
   const setSelected = useMapStore((s) => s.setSelected)
   const [view, setView] = useState('3D Globe')
+  const [mapMode, setMapMode] = useState('3D')
   const [tab, setTab] = useState('Popular Locations')
   const rootRef = useRef(null)
+
+  const handleMenuClick = (label) => {
+    setView(label)
+    if (label === '3D Globe') setMapMode('3D')
+    else if (label === 'Map View') setMapMode('2D')
+  }
 
   const choose = (loc) => {
     setSelected(loc)
@@ -32,16 +39,24 @@ export default function ExplorePage() {
   return (
     <div ref={rootRef} className="relative flex h-full flex-col overflow-y-auto bg-bg text-white lg:block lg:overflow-hidden">
       <div className="relative h-[55vh] min-h-[320px] shrink-0 lg:absolute lg:inset-0 lg:right-[440px] lg:h-auto lg:min-h-0">
-        <MarsGlobe locations={locations} focus={selected} onSelect={setSelected} />
+        <MarsGlobe
+          locations={locations}
+          focus={selected}
+          onSelect={setSelected}
+          mode={mapMode}
+          layer={view === 'Rover Tracks' ? 'missions' : undefined}
+          onCenter={() => setSelected({ ...selected })}
+          onReset={() => setSelected(locations[0])}
+        />
         <aside className={`absolute left-2 top-2 z-10 flex overflow-hidden py-1 lg:left-4 lg:top-4 lg:block lg:w-[200px] lg:py-2 ${panel}`}>
           {menu.map(({ label, icon: Icon }) => (
-            <button key={label} title={label} aria-label={label} onClick={() => setView(label)} className={`flex items-center gap-3 px-3 py-2.5 text-left text-sm transition lg:w-full lg:px-4 lg:py-3 ${view === label ? 'bg-red-500/20 text-white' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}>
+            <button key={label} title={label} aria-label={label} onClick={() => handleMenuClick(label)} className={`flex items-center gap-3 px-3 py-2.5 text-left text-sm transition lg:w-full lg:px-4 lg:py-3 ${view === label ? 'bg-red-500/20 text-white' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}>
               <Icon size={18} />
               <span className="hidden lg:inline">{label}</span>
             </button>
           ))}
         </aside>
-        <div className={`absolute bottom-2 left-2 z-10 flex gap-3 px-3 py-2 text-xs lg:bottom-6 lg:left-4 lg:gap-6 lg:px-5 lg:py-3 lg:text-sm ${panel}`}>
+        <div className={`absolute bottom-2 right-2 z-20 flex gap-3 px-3 py-2 text-xs lg:bottom-6 lg:right-4 lg:gap-6 lg:px-5 lg:py-3 lg:text-sm ${panel}`}>
           <span><span className="text-gray-400">LAT</span> {selected.lat}° N</span>
           <span><span className="text-gray-400">LON</span> {selected.lon}° E</span>
           <span><span className="text-gray-400">ALT</span> {selected.elevation} km</span>
