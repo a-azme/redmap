@@ -1,8 +1,28 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { TILE_LAYERS } from '../../services/layerService'
 
 // Prottek location er jonno zoom level (boro feature e kom zoom)
-const ZOOM = { jezero: 5, nili: 5, tyrrhena: 4, isidis: 3, olympus: 3, valles: 3, butler: 5, delta: 5, neretva: 5, syrtis: 4 }
+const ZOOM = {
+  jezero: 5,
+  nili: 5,
+  tyrrhena: 4,
+  isidis: 3,
+  olympus: 3,
+  valles: 3,
+  butler: 5,
+  delta: 5,
+  neretva: 5,
+  syrtis: 4,
+}
+
+function getThumbZoom(loc) {
+  if (ZOOM[loc.id]) return ZOOM[loc.id]
+  const d = Number(loc.diameter) || 0
+  if (d >= 1500) return 2
+  if (d >= 450) return 3
+  if (d >= 100) return 4
+  return 5
+}
 
 const TILE = 256
 const OUT = 160 // thumbnail pixel size
@@ -24,7 +44,7 @@ const tileUrl = (tpl, ext, z, x, y) =>
 
 async function build(loc) {
   const src = TILE_LAYERS.terrain.sources[0]
-  const z = ZOOM[loc.id] ?? 4
+  const z = getThumbZoom(loc)
   const rows = 2 ** z
   const cols = 2 ** (z + 1)
   const fx = ((norm(loc.lon) + 180) / 360) * cols
@@ -83,22 +103,47 @@ async function build(loc) {
 const cache = new Map()
 
 export default function LocationThumb({ loc, className = '' }) {
-  const [src, setSrc] = useState(null)
+  const elRef = useRef(null)
+  const [visible, setVisible] = useState(() => cache.has(loc.id))
+  const [thumb, setThumb] = useState({ id: null, url: null })
 
   useEffect(() => {
+    if (visible) return
+    const el = elRef.current
+    if (!el || typeof IntersectionObserver === 'undefined') {
+      const t = setTimeout(() => setVisible(true), 0)
+      return () => clearTimeout(t)
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setVisible(true)
+          io.disconnect()
+        }
+      },
+      { rootMargin: '120px' }
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [loc.id, visible])
+
+  useEffect(() => {
+    if (!visible) return
     let alive = true
-    setSrc(null)
     if (!cache.has(loc.id)) cache.set(loc.id, build(loc))
     cache.get(loc.id).then((u) => {
-      if (alive) setSrc(u)
+      if (alive) setThumb({ id: loc.id, url: u })
     })
     return () => {
       alive = false
     }
-  }, [loc.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loc.id, visible]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const src = thumb.id === loc.id ? thumb.url : null
 
   return (
     <div
+      ref={elRef}
       className={`shrink-0 overflow-hidden ${className}`}
       style={{ background: `linear-gradient(135deg, ${loc.color}, #1a0b08)` }}
     >

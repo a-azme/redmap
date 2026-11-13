@@ -125,6 +125,11 @@ export function guardCesiumViewer(viewer) {
       widget._canRender = false
       return
     }
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    if (viewer.resolutionScale !== dpr) {
+      viewer.resolutionScale = dpr
+    }
+    widget._forceResize = true
     origResize()
     const gl = scene?.context?._gl
     if (gl && (gl.drawingBufferWidth <= 0 || gl.drawingBufferHeight <= 0)) {
@@ -135,9 +140,20 @@ export function guardCesiumViewer(viewer) {
   const origRender = widget.render.bind(widget)
   widget.render = function () {
     if (!canSafelyRender()) return
-    if (canvas.width <= 0 || canvas.height <= 0) {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    const targetW = Math.round(canvas.clientWidth * dpr)
+    const targetH = Math.round(canvas.clientHeight * dpr)
+    if (
+      canvas.width <= 0 ||
+      canvas.height <= 0 ||
+      Math.abs(canvas.width - targetW) > 1 ||
+      Math.abs(canvas.height - targetH) > 1
+    ) {
+      if (viewer.resolutionScale !== dpr) {
+        viewer.resolutionScale = dpr
+      }
       widget._forceResize = true
-      widget.resize()
+      origResize()
       if (!canSafelyRender() || canvas.width <= 0 || canvas.height <= 0) return
     }
     origRender()
@@ -202,7 +218,7 @@ export function applyLayer(viewer, cfg, key, cb) {
   ;(async () => {
     let mainReady = false
     if (viewer.imageryLayers.length === 0) {
-      Cesium.SingleTileImageryProvider.fromUrl('/textures/mars.jpg', {
+      Cesium.SingleTileImageryProvider.fromUrl('/assets/mars_texture.jpg', {
         rectangle: Cesium.Rectangle.MAX_VALUE,
         ellipsoid: MARS,
       })
@@ -227,20 +243,15 @@ export function applyLayer(viewer, cfg, key, cb) {
     if (!chosen) {
       console.warn('[RedMap] No working tile source for layer:', key, '– using local texture fallback')
       try {
-        const fallback = await Cesium.SingleTileImageryProvider.fromUrl('/textures/8k_mars.jpg', {
+        const fallback = await Cesium.SingleTileImageryProvider.fromUrl('/assets/mars_texture.jpg', {
           rectangle: Cesium.Rectangle.MAX_VALUE,
           ellipsoid: MARS,
-        }).catch(() =>
-          Cesium.SingleTileImageryProvider.fromUrl('/textures/mars.jpg', {
-            rectangle: Cesium.Rectangle.MAX_VALUE,
-            ellipsoid: MARS,
-          })
-        )
+        })
         if (!isCancelled() && fallback) {
           viewer.imageryLayers.removeAll()
           viewer.imageryLayers.addImageryProvider(fallback)
           viewer.scene.requestRender()
-          cb.onSource('Local 8K Mars Texture')
+          cb.onSource('Local Mars Texture')
           cb.onStatus('ok')
           return
         }
