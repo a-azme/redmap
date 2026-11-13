@@ -39,7 +39,7 @@ export default function ElevationProfile({ route }) {
     <section className="rm-card rm-profile">
       <h3>Elevation Profile</h3>
       <svg viewBox={`0 0 ${W} ${H}`} className="rm-profile__svg"
-        onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+        onPointerMove={onMove} onPointerLeave={(e) => e.pointerType === 'mouse' && setHover(null)}>
         {g.yTicks.map((t) => (
           <g key={t}>
             <line x1={P.l} x2={W - P.r} y1={g.y(t)} y2={g.y(t)} className="rm-grid" />

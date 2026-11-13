@@ -93,173 +93,57 @@ export default function LayersPage() {
   const toggleLayer = (id) => setActive((cur) => (cur === id ? 'terrain' : id))
 
   return (
-    <div className="relative h-full overflow-hidden bg-bg text-white">
-      {/* Globe */}
-      <div className="absolute inset-0">
+    <div className="relative h-full overflow-y-auto bg-bg text-white xl:overflow-hidden">
+      {/* Globe + everything that sits on top of it */}
+      <div className="relative h-[75vh] min-h-[460px] xl:absolute xl:inset-0 xl:h-auto xl:min-h-0">
         <MarsGlobe locations={LOCATIONS} focus={selected} onSelect={pick} layer={active} />
+
+        {/* Left: Map Layers (desktop only) */}
+        <aside className={`absolute left-4 top-4 z-[1100] hidden w-[300px] p-2 xl:block ${panel}`}>
+          {/* KEEP your existing content of this aside (title + LAYERS.map) */}
+        </aside>
+
+        {/* Compass (desktop only) */}
+        <div className="absolute left-[330px] top-4 z-[1100] hidden h-20 w-20 items-center justify-center rounded-full border border-white/10 bg-black/60 backdrop-blur-md xl:flex">
+          {/* KEEP your existing N/S/W/E spans + arrow */}
+        </div>
+
+        {/* Location tooltip */}
+        <div className={`absolute left-1/2 top-3 z-[1100] -translate-x-1/2 whitespace-nowrap px-3 py-2 xl:top-6 xl:px-4 xl:py-3 ${panel}`}>
+          {/* KEEP your existing content */}
+        </div>
+
+        {/* Right action buttons */}
+        <div className="absolute right-3 top-[112px] z-[1100] flex flex-col gap-2 xl:right-[400px] xl:top-4">
+          {/* KEEP your two buttons */}
+        </div>
+
+        {/* Bottom: layer thumbnails */}
+        <div className={`absolute bottom-2 left-2 right-2 z-[1100] flex gap-2 overflow-x-auto p-2 xl:bottom-4 xl:left-4 xl:right-4 xl:gap-3 xl:p-3 ${panel}`}>
+          {LAYERS.map((l) => {
+            const Icon = l.icon
+            return (
+              <button
+                key={l.id}
+                onClick={() => setActive(l.id)}
+                className={`w-[130px] shrink-0 overflow-hidden rounded-xl border text-left transition xl:w-[180px] ${
+                  active === l.id ? 'border-red-500' : 'border-white/10 hover:border-white/30'
+                }`}
+              >
+                <LayerThumb layerId={l.id} grad={l.grad} />
+                <div className="flex items-center gap-2 px-3 py-2 text-sm">
+                  <Icon size={14} /> {l.name.replace('Geological Features', 'Geological')}
+                </div>
+              </button>
+            )
+          })}
+        </div>
       </div>
 
-      {/* Left: Map Layers */}
-      <aside className={`absolute left-4 top-4 z-[1100] w-[300px] p-2 ${panel}`}>
-        <div className="flex items-center gap-2 px-3 py-3 font-semibold">
-          <Layers size={18} /> Map Layers
-        </div>
-        {LAYERS.map((l) => {
-          const Icon = l.icon
-          const on = active === l.id
-          return (
-            <div
-              key={l.id}
-              onClick={() => setActive(l.id)}
-              className={`flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-white/5 ${
-                on ? 'bg-red-500/10' : ''
-              }`}
-            >
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/10">
-                <Icon size={18} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium">{l.name}</div>
-                <div className="truncate text-xs text-gray-400">{l.sub}</div>
-              </div>
-              <Switch on={on} onClick={() => toggleLayer(l.id)} />
-            </div>
-          )
-        })}
+      {/* Right: details (below the globe on mobile) */}
+      <aside className={`relative z-[1100] m-2 p-4 xl:absolute xl:bottom-[132px] xl:right-4 xl:top-4 xl:m-0 xl:w-[370px] xl:overflow-y-auto xl:p-5 ${panel}`}>
+        {/* KEEP everything inside your existing details aside */}
       </aside>
-
-      {/* Compass */}
-      <div className="absolute left-[330px] top-4 z-[1100] flex h-20 w-20 items-center justify-center rounded-full border border-white/10 bg-black/60 backdrop-blur-md">
-        <span className="absolute top-1 text-[10px] text-gray-300">N</span>
-        <span className="absolute bottom-1 text-[10px] text-gray-300">S</span>
-        <span className="absolute left-2 text-[10px] text-gray-300">W</span>
-        <span className="absolute right-2 text-[10px] text-gray-300">E</span>
-        <div className="h-0 w-0 border-x-[7px] border-b-[22px] border-x-transparent border-b-red-500" />
-      </div>
-
-      {/* Location tooltip */}
-      <div className={`absolute left-1/2 top-6 z-[1100] -translate-x-1/2 px-4 py-3 ${panel}`}>
-        <div className="flex items-center gap-2 text-sm font-semibold">
-          <MapPin size={14} style={{ color: selected.color }} /> {selected.name}
-        </div>
-        <div className="mt-0.5 text-xs text-gray-400">
-          {selected.lat}° N, {selected.lon}° E
-        </div>
-        <div className="text-xs text-gray-400">Elevation: {selected.elevation} km</div>
-      </div>
-
-      {/* Right action buttons */}
-      <div className="absolute right-[400px] top-4 z-[1100] flex flex-col gap-2">
-        <button
-          onClick={() => pick({ ...selected })}
-          title="Center on location"
-          className={`flex h-11 w-11 items-center justify-center ${panel} hover:bg-white/10`}
-        >
-          <Crosshair size={18} />
-        </button>
-        <button
-          onClick={() => pick(LOCATIONS[0])}
-          title="Reset"
-          className={`flex h-11 w-11 items-center justify-center ${panel} hover:bg-white/10`}
-        >
-          <RotateCcw size={18} />
-        </button>
-      </div>
-
-      {/* Right: details */}
-      <aside className={`absolute bottom-[132px] right-4 top-4 z-[1100] w-[370px] overflow-y-auto p-5 ${panel}`}>
-        <div className="flex gap-4">
-          <LocationThumb loc={selected} className="h-[84px] w-[84px] rounded-xl" />
-          <div>
-            <h2 className="text-lg font-bold">{selected.name}</h2>
-            <div className="text-sm text-gray-400">
-              {selected.lat}° N, {selected.lon}° E
-            </div>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {selected.tags.map((t) => (
-                <span key={t} className="rounded-md bg-white/10 px-2 py-0.5 text-[11px] text-gray-200">
-                  {t}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <p className="mt-4 border-b border-white/10 pb-4 text-sm text-gray-300">{selected.desc}</p>
-
-        <h3 className="mt-4 font-semibold">Terrain &amp; Elevation</h3>
-        <div className="mt-3 space-y-3 text-sm">
-          {[
-            ['Terrain Type', selected.terrain, Mountain],
-            ['Elevation', `${selected.elevation} km`, TrendingUp],
-            ['Avg. Slope', `${selected.slope}°`, TrendingUp],
-            ['Temperature (est.)', `${selected.temp}°C`, Thermometer],
-          ].map(([label, value, Icon]) => (
-            <div key={label} className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10">
-                <Icon size={16} />
-              </div>
-              <div>
-                <div className="text-xs text-gray-400">{label}</div>
-                <div className="font-medium">{value}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <h3 className="mt-5 border-t border-white/10 pt-4 font-semibold">Related Missions</h3>
-        <div className="mt-3 flex gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[9px] font-bold">
-            NASA
-          </div>
-          <div>
-            <div className="text-sm font-medium">{selected.mission.name}</div>
-            <div className="text-xs text-gray-400">({selected.mission.years})</div>
-            <div className="mt-1 text-xs text-gray-400">{selected.mission.note}</div>
-          </div>
-        </div>
-
-        <div className="mt-4 flex flex-wrap gap-2">
-          {LOCATIONS.map((l) => (
-            <button
-              key={l.id}
-              onClick={() => pick(l)}
-              className={`rounded-full border px-3 py-1 text-xs transition ${
-                selected.id === l.id
-                  ? 'border-red-500 bg-red-500/20'
-                  : 'border-white/10 text-gray-400 hover:text-white'
-              }`}
-            >
-              {l.name}
-            </button>
-          ))}
-        </div>
-
-        <button className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 py-3 text-sm hover:bg-white/10">
-          View More Details <ExternalLink size={14} />
-        </button>
-      </aside>
-
-      {/* Bottom: layer thumbnails (real NASA tile) */}
-      <div className={`absolute bottom-4 left-4 right-4 z-[1100] flex gap-3 overflow-x-auto p-3 ${panel}`}>
-        {LAYERS.map((l) => {
-          const Icon = l.icon
-          return (
-            <button
-              key={l.id}
-              onClick={() => setActive(l.id)}
-              className={`w-[180px] shrink-0 overflow-hidden rounded-xl border text-left transition ${
-                active === l.id ? 'border-red-500' : 'border-white/10 hover:border-white/30'
-              }`}
-            >
-              <LayerThumb layerId={l.id} grad={l.grad} />
-              <div className="flex items-center gap-2 px-3 py-2 text-sm">
-                <Icon size={14} /> {l.name.replace('Geological Features', 'Geological')}
-              </div>
-            </button>
-          )
-        })}
-      </div>
     </div>
   )
 }

@@ -5,7 +5,7 @@ export default function MainLayout() {
   return (
     <div className="h-full flex flex-col bg-bg">
       <Navbar />
-      <main className="flex-1 relative overflow-hidden">
+      <main className="relative min-h-0 flex-1 overflow-hidden">
         <Outlet />
       </main>
     </div>

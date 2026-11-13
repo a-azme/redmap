@@ -35,7 +35,7 @@ export default function SearchBar() {
 
   return (
     <div ref={boxRef} className="relative">
-      <div className="flex items-center gap-2 bg-panel-2 border border-line rounded-full px-4 py-2 w-72">
+      <div className="flex items-center gap-2 bg-panel-2 border border-line rounded-full px-4 py-2 w-40 sm:w-56 xl:w-72">
         <input
           value={query}
           onChange={(e) => {
@@ -48,13 +48,13 @@ export default function SearchBar() {
             if (e.key === 'Escape') setOpen(false)
           }}
           placeholder="Search location..."
-          className="bg-transparent outline-none text-sm flex-1 placeholder:text-muted"
+          className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted sm:text-sm"
         />
         <Search size={16} className="text-muted" />
       </div>
 
       {open && q && (
-        <div className="absolute top-12 left-0 w-full bg-panel border border-line rounded-xl overflow-hidden z-50 shadow-xl">
+        <div className="absolute top-12 right-0 w-72 max-w-[calc(100vw-1.5rem)] bg-panel border border-line rounded-xl overflow-hidden z-50 shadow-xl">
           {results.length === 0 ? (
             <div className="px-4 py-3 text-sm text-muted">No location found</div>
           ) : (

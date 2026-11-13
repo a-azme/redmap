@@ -99,9 +99,9 @@ export default function MissionsPage() {
     : []
 
   return (
-    <div className="grid h-[calc(100vh-82px)] grid-cols-[320px_1fr_380px] gap-4 p-4 text-white">
+    <div className="grid h-full grid-cols-1 content-start gap-4 overflow-y-auto p-3 text-white xl:grid-cols-[320px_1fr_380px] xl:grid-rows-1 xl:overflow-hidden xl:p-4">
       {/* Left: mission list */}
-      <aside className="flex min-h-0 flex-col rounded-2xl border border-white/10 bg-[#0b0e13] p-4">
+      <aside className="flex flex-col rounded-2xl border border-white/10 bg-[#0b0e13] p-4 xl:min-h-0">
         <h2 className="text-lg font-semibold">NASA Missions</h2>
         <p className="mt-1 text-xs text-white/50">Surface and orbital missions, combined by location.</p>
         <div className="mt-3 flex flex-wrap gap-2">
@@ -112,7 +112,7 @@ export default function MissionsPage() {
             </button>
           ))}
         </div>
-        <div className="mt-3 flex-1 space-y-2 overflow-y-auto pr-1">
+        <div className="mt-3 max-h-[320px] flex-1 space-y-2 overflow-y-auto pr-1 xl:max-h-none">
           {MISSIONS.filter((m) => filter === 'all' || m.type === filter).map((m) => (
             <button key={m.id} onClick={() => select(m)}
               className={`w-full rounded-xl border p-3 text-left transition ${selId === m.id ? 'border-red-500/60 bg-red-500/10' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}>
@@ -127,17 +127,17 @@ export default function MissionsPage() {
       </aside>
 
       {/* Center: globe */}
-      <main className="relative min-h-0 overflow-hidden rounded-2xl border border-white/10 bg-[#07090c]">
+      <main className="relative order-first h-[45vh] min-h-[300px] overflow-hidden rounded-2xl border border-white/10 bg-[#07090c] xl:order-none xl:h-auto xl:min-h-0">
         <MarsGlobe locations={pins} focus={focus} onSelect={(d) => select(byId(d.id))} />
         <div className="pointer-events-none absolute bottom-3 left-3 flex gap-3 rounded-lg bg-black/50 px-3 py-1.5 text-[11px] text-white/70">
           <span><i className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: TYPE_COLOR.rover }} />Rover</span>
           <span><i className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: TYPE_COLOR.lander }} />Lander</span>
-          <span className="text-white/40">Orbiters cover the whole planet</span>
+          <span className="hidden text-white/40 sm:inline">Orbiters cover the whole planet</span>
         </div>
       </main>
 
       {/* Right: detail + multi-mission data */}
-      <aside className="min-h-0 space-y-4 overflow-y-auto rounded-2xl border border-white/10 bg-[#0b0e13] p-4">
+      <aside className="space-y-4 rounded-2xl border border-white/10 bg-[#0b0e13] p-4 xl:min-h-0 xl:overflow-y-auto">
         <div>
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-xl font-semibold">{sel.name}</h2>
