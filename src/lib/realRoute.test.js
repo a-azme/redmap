@@ -1,7 +1,7 @@
 // Run with: npm test   (uses Node's built-in test runner, no extra dependencies)
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { planRealRoute, gridSpec, RouteError } from './realRoute.js'
+import { planRealRoute, planRealRouteHopped, gridSpec, RouteError } from './realRoute.js'
 import { haversineKm } from './routeAnalysis.js'
 
 const NILI = { id: 'nili', name: 'Nili Fossae', lat: 21.0, lon: 74.5 }
@@ -207,4 +207,45 @@ test('long trips are flagged as overview only and the risk is a minimum', async 
   const short = await planRealRoute(NILI, JEZERO, settings(), terrainOf(() => -2))
   assert.notEqual(short.reliability, 'overview')
   assert.equal(short.riskIsMinimum, false)
+})
+
+// ---- long trips are re-planned in hops on finer grids ----
+const ISIDIS = { id: 'isidis', name: 'Isidis Planitia', lat: 12.9, lon: 87.0 }
+// a field of 12 km craters with 1 km rims, a crater every ~1 degree: far too small for a 45 km grid to see
+const crateredField = (lat, lon) => {
+  const la = Math.round(lat / 1.1) * 1.1 + Math.sin(Math.round(lat / 1.1) * 7.3) * 0.2
+  const lo = Math.round(lon / 1.3) * 1.3 + Math.cos(Math.round(lon / 1.3) * 5.1) * 0.2
+  const d = haversineKm({ lat, lon }, { lat: la, lon: lo })
+  return -1 + (d < 10 ? -1.2 * (1 - (d / 10) ** 2) : Math.exp(-((d - 10) ** 2) / 18))
+}
+
+test('a long trip is re-planned in hops, sees craters the overview grid cannot, and stays one clean route', async () => {
+  const terrain = { ...terrainOf(crateredField), pois: [] }
+  const s = settings({ mode: 'safest', showScience: false })
+  const coarse = await planRealRoute(VALLES, ISIDIS, s, terrain)
+  const hop = await planRealRouteHopped(VALLES, ISIDIS, s, terrain)
+  const gc = haversineKm(VALLES, ISIDIS)
+  assert.ok(hop.dataSource.hops >= 8, `hops ${hop.dataSource.hops}`)
+  assert.ok(hop.dataSource.resolutionKm < coarse.dataSource.resolutionKm / 4)
+  assert.equal(hop.reliability, 'hopped')
+  assert.equal(hop.riskIsMinimum, false)
+  assert.ok(hop.distanceKm >= gc * 0.97 && hop.distanceKm < gc * 1.3, `${hop.distanceKm} vs ${gc}`)
+  // one continuous route
+  assert.equal(hop.points[hop.points.length - 1].km, hop.distanceKm)
+  for (let i = 1; i < hop.points.length; i++) assert.ok(hop.points[i].km >= hop.points[i - 1].km)
+  assert.ok(hop.points.length <= 241)
+  // the overview grid is blind to these craters; the hopped route measures them
+  assert.ok(hop.maxSlopeDeg > coarse.maxSlopeDeg)
+  assert.ok(hop.warnings.some((w) => w.title === 'Long route planned in hops'))
+  assert.ok(!hop.warnings.some((w) => w.title === 'Overview route only'))
+  // waypoints are numbered in travel order and the legs add up to the whole route
+  hop.waypoints.forEach((w, i) => assert.equal(w.n, i + 1))
+  for (let i = 1; i < hop.waypoints.length; i++) assert.ok(hop.waypoints[i].km >= hop.waypoints[i - 1].km)
+  assert.equal(hop.legs.reduce((n, l) => n + l.km, 0), hop.distanceKm)
+  structuredClone(hop) // it has to cross the worker boundary
+})
+
+test('a trip under the hop limit is planned on one grid, as before', async () => {
+  const r = await planRealRouteHopped(NILI, JEZERO, settings(), terrainOf(() => -2))
+  assert.ok(!r.dataSource.hops)
 })

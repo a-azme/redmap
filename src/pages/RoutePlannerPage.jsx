@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import RouteMap from '../components/route/RouteMap'
 import RoutePanel from '../components/route/RoutePanel'
@@ -25,8 +25,16 @@ export default function RoutePlannerPage() {
   const [hazard, setHazard] = useState('off') // map heat-map: 'off' | 'slope' | 'low'
   const [layer, setLayer] = useState('terrain')
   const [mode, setMode] = useState('3D')
+  const [focus, setFocus] = useState(false) // full-screen map: hide every card
   const [evaDate, setEvaDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [travel, setTravel] = useState('rover')
+
+  useEffect(() => {
+    if (!focus) return
+    const onKey = (e) => { if (e.key === 'Escape') setFocus(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [focus])
 
   const plan = useMemo(() => {
     if (!route) return null
@@ -38,9 +46,9 @@ export default function RoutePlannerPage() {
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
 
     return (
-    <div className="rm-page">
+    <div className={`rm-page${focus ? ' is-focus' : ''}`}>
       <div className="rm-mapwrap">
-        <RouteMap route={route} hazard={hazard} layer={layer} mode={mode} selectedStopIds={selected} />
+        <RouteMap route={route} hazard={hazard} layer={layer} mode={mode} selectedStopIds={selected} focus={focus} />
       </div>
 
       <div className="rm-layout">
@@ -65,6 +73,11 @@ export default function RoutePlannerPage() {
               <button key={m} className={mode === m ? 'is-active' : ''} onClick={() => setMode(m)}>{m}</button>
             ))}
           </div>
+          <div className="rm-viewtoggle">
+            <button className={focus ? 'is-active' : ''} onClick={() => setFocus((f) => !f)} title="Hide the cards and see the whole map (Esc to go back)">
+              {focus ? 'Show panels' : 'Map view'}
+            </button>
+          </div>
         </div>
 
         <div className="rm-right">
@@ -75,6 +88,13 @@ export default function RoutePlannerPage() {
           <RouteWarnings route={route} />
           <ScienceStops route={route} selectedIds={selected} onToggle={toggleStop} />
         </div>
+
+        {focus && route && (
+          <div className="rm-focuschip">
+            <strong>{route.start.name} → {route.end.name}</strong>
+            <span>{route.distanceKm.toLocaleString()} km · {route.sols} sols · {route.riskLabel} risk {route.riskIsMinimum ? '≥ ' : ''}{route.risk}</span>
+          </div>
+        )}
 
         <div className="rm-bottom">
           <RouteOverview route={route} plan={plan} selectedStopIds={selected} />

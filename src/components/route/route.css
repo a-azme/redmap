@@ -311,3 +311,25 @@
 .rm-legrisk small { color: var(--muted); margin-left: 4px; }
 .rm-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 .rm-dot--low { background: #4be08a; } .rm-dot--moderate { background: #f5a524; } .rm-dot--high { background: #ff4d4d; }
+
+/* ============ full-screen map view ============ */
+.rm-page.is-focus .rm-panel, .rm-page.is-focus .rm-right, .rm-page.is-focus .rm-bottom { display: none; }
+.rm-page.is-focus .rm-ctrls { right: 16px; }
+.rm-focuschip { left: 16px; bottom: 16px; display: grid; gap: 2px; padding: 10px 14px; border-radius: 12px; max-width: min(420px, calc(100% - 32px));
+  background: rgba(12, 14, 20, .88); border: 1px solid rgba(255,255,255,.09); color: #f1f1f4; font-size: 13px; user-select: none; }
+.rm-focuschip span { color: #9aa0ad; font-size: 12px; }
+
+/* ============ dark glass for the view toggles (only these; the cards stay solid so their text is easy to read) ============ */
+.rm-viewtoggle {
+  background: rgba(14, 16, 22, .42);
+  -webkit-backdrop-filter: blur(12px) saturate(120%);
+  backdrop-filter: blur(12px) saturate(120%);
+  border: 1px solid rgba(255, 255, 255, .12);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .3);
+}
+.rm-viewtoggle button { transition: background .15s ease; }
+.rm-viewtoggle button:hover:not(.is-active) { background: rgba(255, 255, 255, .08); }
+.rm-viewtoggle button.is-active { background: rgba(226, 59, 46, .85); }
+@supports not (backdrop-filter: blur(1px)) {
+  .rm-viewtoggle { background: rgba(12, 14, 20, .88); }
+}

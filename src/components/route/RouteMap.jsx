@@ -17,7 +17,7 @@ const HOME = () => at(77, 18, 1.4e7)
 // Rectangle (2D view) that puts the whole route in the open middle of the screen: side panels cover
 // about a third of the width and the bottom cards about 40% of the height, so the route is fitted into the
 // top-middle band instead of the centre of the screen.
-function fitRect(route, viewer) {
+function fitRect(route, viewer, focus = false) {
   let prev = null
   const lons = route.path.map((p) => {
     let l = toLon(p.lon)
@@ -33,7 +33,7 @@ function fitRect(route, viewer) {
   const s = Math.min(...lats), n = Math.max(...lats)
   const cw = viewer?.canvas?.clientWidth || 1600, ch = viewer?.canvas?.clientHeight || 800
   const aspect = Math.max(0.8, cw / ch)
-  const OPEN_W = 0.5, OPEN_H = 0.42 // share of the screen left open by the panels
+  const OPEN_W = focus ? 0.8 : 0.5, OPEN_H = focus ? 0.75 : 0.42 // share of the screen left open by the panels
   const needW = Math.max(e - w, 4) / OPEN_W
   const needH = Math.max(n - s, 3) / OPEN_H
   const viewH = Math.min(178, Math.max(needH, needW / aspect))
@@ -49,7 +49,7 @@ function fitRect(route, viewer) {
 }
 
 // 3D: oblique "Google Earth" look at the route. 2D: flat fit.
-function fitView(viewer, route, duration = 1.8) {
+function fitView(viewer, route, duration = 1.8, focus = false) {
   if (!route || !viewer || viewer.isDestroyed()) return
   if (viewer.scene.mode === Cesium.SceneMode.SCENE3D) {
     const sphere = Cesium.BoundingSphere.fromPoints(route.path.map((p) => at(p.lon, p.lat)))
@@ -62,11 +62,11 @@ function fitView(viewer, route, duration = 1.8) {
       ),
     })
   } else {
-    viewer.camera.flyTo({ destination: fitRect(route, viewer), duration })
+    viewer.camera.flyTo({ destination: fitRect(route, viewer, focus), duration })
   }
 }
 
-export default function RouteMap({ route, hazard = 'off', layer = 'terrain', mode = '3D', selectedStopIds = [] }) {
+export default function RouteMap({ route, hazard = 'off', layer = 'terrain', mode = '3D', selectedStopIds = [], focus = false }) {
   const elRef = useRef(null)
   const viewerRef = useRef(null)
   const routeRef = useRef(route)
@@ -77,6 +77,8 @@ export default function RouteMap({ route, hazard = 'off', layer = 'terrain', mod
   const [used, setUsed] = useState('')
 
   routeRef.current = route
+  const focusRef = useRef(focus)
+  focusRef.current = focus
   const cfg = TILE_LAYERS[layer] || TILE_LAYERS.terrain
 
   /* ---- 1. viewer (once) ---- */
@@ -324,7 +326,14 @@ export default function RouteMap({ route, hazard = 'off', layer = 'terrain', mod
     const h = cam.positionCartographic.height
     dir > 0 ? cam.zoomIn(h * 0.5) : cam.zoomOut(h * 0.7)
   }
-  const recenter = () => fitView(viewerRef.current, routeRef.current)
+  const recenter = () => fitView(viewerRef.current, routeRef.current, 1.8, focusRef.current)
+  // entering or leaving the full-screen map view: re-frame the route for the space that is now free
+  const firstFocus = useRef(true)
+  useEffect(() => {
+    if (firstFocus.current) { firstFocus.current = false; return }
+    const v = viewerRef.current
+    if (v && routeRef.current) fitView(v, routeRef.current, 1.2, focus)
+  }, [focus])
   const reset = () => {
     const v = viewerRef.current
     if (!v) return
@@ -333,7 +342,7 @@ export default function RouteMap({ route, hazard = 'off', layer = 'terrain', mod
   }
 
   return (
-    <div className="rm-map">
+    <div className={`rm-map${focus ? ' rm-map--focus' : ''}`}>
       <div ref={elRef} style={{ width: '100%', height: '100%' }} />
 
       <div className="rm-ctrls">
